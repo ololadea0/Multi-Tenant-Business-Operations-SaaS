@@ -1,4 +1,7 @@
 from fastapi import FastAPI
+from sqlalchemy import text
+
+from app.core.database import engine
 
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
@@ -10,4 +13,13 @@ app = FastAPI(
 def root():
     return {
         "message": "Multi-Tenant Business Operations API is running"
+    }
+
+@app.get("/health/db")
+def database_health():
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+
+    return {
+        "database": "connected"
     }
