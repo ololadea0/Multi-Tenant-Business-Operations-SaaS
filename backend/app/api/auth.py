@@ -10,6 +10,7 @@ from app.models.user import User
 from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
 from app.schemas.auth import RegisterRequest, LoginRequest
+from app.api.dependencies import get_current_user
 
 
 router = APIRouter(
@@ -107,4 +108,16 @@ def login(
     return {
         "access_token": access_token,
         "token_type": "bearer"
+    }
+
+@router.get("/me")
+def get_me(
+    current_user: User = Depends(get_current_user)
+):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "avatar_url": current_user.avatar_url,
+        "is_active": current_user.is_active
     }
