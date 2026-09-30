@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
 
+    RESEND_API_KEY: str
+    EMAIL_FROM: str
+    FRONTEND_URL: str
+    
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+
     class Config:
         env_file = ".env"
 

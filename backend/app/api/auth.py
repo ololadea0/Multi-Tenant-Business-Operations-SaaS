@@ -14,6 +14,7 @@ from app.schemas.auth import RegisterRequest, LoginRequest, ForgotPasswordReques
 from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
 from app.models.password_reset_token import PasswordResetToken
+from app.services.email import send_password_reset_email
 
 router = APIRouter(
     prefix="/api/auth",
@@ -162,9 +163,14 @@ def forgot_password(
         db.add(reset_token)
         db.commit()
 
-        # Temporary development output.
-        print(
-            f"Password reset token for {user.email}: {raw_token}"
+        reset_url = (
+            f"{settings.FRONTEND_URL}"
+            f"/reset-password?token={raw_token}"
+        )
+
+        send_password_reset_email(
+            user.email,
+            reset_url
         )
 
     return {

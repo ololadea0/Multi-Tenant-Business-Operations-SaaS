@@ -2,8 +2,11 @@ alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
+Authlib==1.8.0
 bcrypt==5.0.0
+certifi==2026.7.22
 cffi==2.1.1
+charset-normalizer==3.5.2
 click==8.5.0
 cryptography==50.0.1
 ecdsa==0.19.2
@@ -12,6 +15,7 @@ fastapi==0.141.1
 greenlet==3.5.6
 h11==0.16.0
 idna==3.20
+joserfc==1.7.5
 Mako==1.4.3
 MarkupSafe==3.0.3
 psycopg2-binary==2.9.13
@@ -22,6 +26,8 @@ pydantic-settings==2.15.0
 pydantic_core==2.46.5
 python-dotenv==1.2.3
 python-jose==3.5.0
+requests==2.34.2
+resend==2.49.0
 rsa==4.9.1
 six==1.17.0
 SQLAlchemy==2.0.54
@@ -29,4 +35,5 @@ starlette==1.7.0
 tomli==2.4.1
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+urllib3==2.8.0
 uvicorn==0.54.0
