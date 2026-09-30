@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from jose import JWTError, jwt
 from app.core.config import settings
+import hashlib
+import secrets
 
 
 def hash_password(password: str) -> str:
@@ -60,3 +62,21 @@ def decode_access_token(token: str) -> int:
 
     except (JWTError, ValueError):
         raise ValueError("Invalid or expired token")
+    
+def create_refresh_token() -> tuple[str, str, datetime]:
+    raw_token = secrets.token_urlsafe(64)
+
+    token_hash = hashlib.sha256(
+        raw_token.encode("utf-8")
+    ).hexdigest()
+
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
+    )
+
+    return raw_token, token_hash, expires_at
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()

@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token
+from datetime import datetime, timezone
+
 
 
 
@@ -11,6 +13,8 @@ from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
 from app.schemas.auth import RegisterRequest, LoginRequest
 from app.api.dependencies import get_current_user
+
+from app.models.refresh_token import RefreshToken
 
 
 router = APIRouter(
@@ -91,7 +95,10 @@ def login(
             detail="Invalid email or password"
         )
 
-    if not verify_password(data.password, user.password_hash):
+    if not verify_password(
+        data.password,
+        user.password_hash
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
@@ -105,8 +112,22 @@ def login(
 
     access_token = create_access_token(user.id)
 
+    raw_refresh_token, token_hash, expires_at = (
+        create_refresh_token()
+    )
+
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at
+    )
+
+    db.add(refresh_token)
+    db.commit()
+
     return {
         "access_token": access_token,
+        "refresh_token": raw_refresh_token,
         "token_type": "bearer"
     }
 
@@ -120,4 +141,89 @@ def get_me(
         "full_name": current_user.full_name,
         "avatar_url": current_user.avatar_url,
         "is_active": current_user.is_active
+    }
+
+@router.post("/refresh")
+def refresh(
+    refresh_token: str,
+    db: Session = Depends(get_db)
+):
+    token_hash = hash_refresh_token(refresh_token)
+
+    stored_token = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash
+    ).first()
+
+    if not stored_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if stored_token.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked"
+        )
+
+    if stored_token.expires_at.replace(
+        tzinfo=timezone.utc
+    ) < now:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
+        )
+
+    user = db.query(User).filter(
+        User.id == stored_token.user_id
+    ).first()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is not available"
+        )
+
+    stored_token.revoked_at = now
+
+    access_token = create_access_token(user.id)
+
+    new_raw_token, new_token_hash, new_expires_at = (
+        create_refresh_token()
+    )
+
+    new_refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=new_token_hash,
+        expires_at=new_expires_at
+    )
+
+    db.add(new_refresh_token)
+    db.commit()
+
+    return {
+        "access_token": access_token,
+        "refresh_token": new_raw_token,
+        "token_type": "bearer"
+    }
+
+@router.post("/logout")
+def logout(
+    refresh_token: str,
+    db: Session = Depends(get_db)
+):
+    token_hash = hash_refresh_token(refresh_token)
+
+    stored_token = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash
+    ).first()
+
+    if stored_token:
+        stored_token.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+
+    return {
+        "message": "Logout successful"
     }
