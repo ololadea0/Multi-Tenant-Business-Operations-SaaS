@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlalchemy.orm import Session
+
 
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token
 from datetime import datetime, timezone
-
-
+from app.core.config import settings
 
 
 from app.models.user import User
@@ -13,8 +13,8 @@ from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
 from app.schemas.auth import RegisterRequest, LoginRequest
 from app.api.dependencies import get_current_user
-
 from app.models.refresh_token import RefreshToken
+
 
 
 router = APIRouter(
@@ -83,6 +83,7 @@ def register(
 @router.post("/login")
 def login(
     data: LoginRequest,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     user = db.query(User).filter(
@@ -116,6 +117,15 @@ def login(
         create_refresh_token()
     )
 
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=False,  # True in production with HTTPS
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
     refresh_token = RefreshToken(
         user_id=user.id,
         token_hash=token_hash,
@@ -127,7 +137,6 @@ def login(
 
     return {
         "access_token": access_token,
-        "refresh_token": raw_refresh_token,
         "token_type": "bearer"
     }
 
@@ -145,9 +154,15 @@ def get_me(
 
 @router.post("/refresh")
 def refresh(
-    refresh_token: str,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
     db: Session = Depends(get_db)
 ):
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is missing"
+        )
     token_hash = hash_refresh_token(refresh_token)
 
     stored_token = db.query(RefreshToken).filter(
@@ -194,6 +209,15 @@ def refresh(
         create_refresh_token()
     )
 
+    response.set_cookie(
+        key="refresh_token",
+        value=new_raw_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
     new_refresh_token = RefreshToken(
         user_id=user.id,
         token_hash=new_token_hash,
@@ -205,24 +229,29 @@ def refresh(
 
     return {
         "access_token": access_token,
-        "refresh_token": new_raw_token,
         "token_type": "bearer"
-    }
+}
 
 @router.post("/logout")
 def logout(
-    refresh_token: str,
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
     db: Session = Depends(get_db)
 ):
-    token_hash = hash_refresh_token(refresh_token)
+    if refresh_token:
+        token_hash = hash_refresh_token(refresh_token)
 
-    stored_token = db.query(RefreshToken).filter(
-        RefreshToken.token_hash == token_hash
-    ).first()
+        stored_token = db.query(RefreshToken).filter(
+            RefreshToken.token_hash == token_hash
+        ).first()
 
-    if stored_token:
-        stored_token.revoked_at = datetime.now(timezone.utc)
-        db.commit()
+        if stored_token:
+            stored_token.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+
+    response.delete_cookie(
+        key="refresh_token"
+    )
 
     return {
         "message": "Logout successful"
