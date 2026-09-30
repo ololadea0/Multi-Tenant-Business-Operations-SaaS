@@ -38,3 +38,7 @@ class RegisterRequest(BaseModel):
             )
 
         return value
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
