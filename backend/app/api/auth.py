@@ -72,6 +72,13 @@ async def google_callback(
             detail="Google account information is incomplete"
         )
 
+    if not user_info.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google email is not verified"
+        )
+        
+
     user = db.query(User).filter(
         User.google_id == google_id
     ).first()
