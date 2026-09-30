@@ -1,27 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlalchemy.orm import Session
 
-
 from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token
-from datetime import datetime, timezone
+from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token, create_password_reset_token
+from datetime import datetime, timedelta, timezone
 from app.core.config import settings
-
 
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
-from app.schemas.auth import RegisterRequest, LoginRequest
+from app.schemas.auth import RegisterRequest, LoginRequest, ForgotPasswordRequest
 from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
-
-
+from app.models.password_reset_token import PasswordResetToken
 
 router = APIRouter(
     prefix="/api/auth",
     tags=["Authentication"]
 )
-
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(
@@ -138,6 +134,41 @@ def login(
     return {
         "access_token": access_token,
         "token_type": "bearer"
+    }
+
+@router.post("/forgot-password")
+def forgot_password(
+    data: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(
+        User.email == data.email
+    ).first()
+
+    if user:
+        raw_token, token_hash = create_password_reset_token()
+
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
+        )
+
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at
+        )
+
+        db.add(reset_token)
+        db.commit()
+
+        # Temporary development output.
+        print(
+            f"Password reset token for {user.email}: {raw_token}"
+        )
+
+    return {
+        "message": "If an account with that email exists, "
+        "a password reset link has been sent."
     }
 
 @router.get("/me")
