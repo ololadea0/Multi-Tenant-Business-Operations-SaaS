@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from sqlalchemy.orm import Session
+import hashlib
 
 from app.core.database import get_db
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token, create_password_reset_token
@@ -9,7 +10,7 @@ from app.core.config import settings
 from app.models.user import User
 from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
-from app.schemas.auth import RegisterRequest, LoginRequest, ForgotPasswordRequest
+from app.schemas.auth import RegisterRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest
 from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
 from app.models.password_reset_token import PasswordResetToken
@@ -169,6 +170,61 @@ def forgot_password(
     return {
         "message": "If an account with that email exists, "
         "a password reset link has been sent."
+    }
+
+@router.post("/reset-password")
+def reset_password(
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    token_hash = hashlib.sha256(
+        data.token.encode("utf-8")
+    ).hexdigest()
+
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    if reset_token.used_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if reset_token.expires_at.replace(
+        tzinfo=timezone.utc
+    ) < now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    user = db.query(User).filter(
+        User.id == reset_token.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    user.password_hash = hash_password(data.new_password)
+
+    reset_token.used_at = now
+
+    db.commit()
+
+    return {
+        "message": "Password reset successful"
     }
 
 @router.get("/me")
