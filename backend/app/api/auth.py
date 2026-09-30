@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie, Request
 from sqlalchemy.orm import Session
 import hashlib
 
@@ -15,11 +15,145 @@ from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
 from app.models.password_reset_token import PasswordResetToken
 from app.services.email import send_password_reset_email
+from authlib.integrations.starlette_client import OAuth
+
+oauth = OAuth()
+
+oauth.register(
+    name="google",
+    client_id=settings.GOOGLE_CLIENT_ID,
+    client_secret=settings.GOOGLE_CLIENT_SECRET,
+    server_metadata_url=(
+        "https://accounts.google.com/.well-known/openid-configuration"
+    ),
+    client_kwargs={
+        "scope": "openid email profile"
+    }
+)
 
 router = APIRouter(
     prefix="/api/auth",
     tags=["Authentication"]
 )
+
+@router.get("/google")
+async def google_login(request: Request):
+    redirect_uri = settings.GOOGLE_REDIRECT_URI
+
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri
+    )
+
+@router.get("/google/callback")
+async def google_callback(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    token = await oauth.google.authorize_access_token(request)
+
+    user_info = token.get("userinfo")
+
+    if not user_info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to retrieve Google user information"
+        )
+
+    google_id = user_info.get("sub")
+    email = user_info.get("email")
+    full_name = user_info.get("name")
+    avatar_url = user_info.get("picture")
+
+    if not google_id or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google account information is incomplete"
+        )
+
+    user = db.query(User).filter(
+        User.google_id == google_id
+    ).first()
+
+    if not user:
+        user = db.query(User).filter(
+            User.email == email
+        ).first()
+
+    if not user:
+        user = User(
+            email=email,
+            full_name=full_name or email.split("@")[0],
+            google_id=google_id,
+            avatar_url=avatar_url
+        )
+
+        db.add(user)
+        db.flush()
+
+        organization = Organization(
+            name=f"{user.full_name}'s Organization",
+            slug=f"user-{user.id}"
+        )
+
+        db.add(organization)
+        db.flush()
+
+        membership = Membership(
+            user_id=user.id,
+            organization_id=organization.id,
+            role=MembershipRole.OWNER
+        )
+
+        db.add(membership)
+        db.commit()
+        db.refresh(user)
+
+    else:
+        if not user.google_id:
+            user.google_id = google_id
+
+        if avatar_url:
+            user.avatar_url = avatar_url
+
+        db.commit()
+        db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    access_token = create_access_token(user.id)
+
+    raw_refresh_token, token_hash, expires_at = (
+        create_refresh_token()
+    )
+
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at
+    )
+
+    db.add(refresh_token)
+    db.commit()
+
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(

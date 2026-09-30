@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from starlette.middleware.sessions import SessionMiddleware
+from app.core.config import settings
 
 from app.core.database import engine
 from app.api.auth import router as auth_router
@@ -7,6 +9,11 @@ from app.api.auth import router as auth_router
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
     version="1.0.0"
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.JWT_SECRET_KEY
 )
 
 app.include_router(auth_router)
