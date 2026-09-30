@@ -80,3 +80,14 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(
         token.encode("utf-8")
     ).hexdigest()
+
+def create_password_reset_token() -> tuple[str, str]:
+    raw_token = secrets.token_urlsafe(48)
+
+    token_hash = hashlib.sha256(
+        raw_token.encode("utf-8")
+    ).hexdigest()
+
+    return raw_token, token_hash
+
+    
