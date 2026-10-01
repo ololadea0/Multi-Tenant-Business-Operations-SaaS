@@ -6,3 +6,4 @@ from app.models.password_reset_token import PasswordResetToken
 from app.models.invitation import OrganizationInvitation
 from app.models.product import Product
 from app.models.inventory import InventoryMovement
+from app.models.customer import Customer
