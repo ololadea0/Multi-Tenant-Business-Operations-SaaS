@@ -9,6 +9,7 @@ from app.api.organization import router as organization_router
 from app.api.member import router as member_router
 from app.api.invitation import router as invitation_router
 from app.api.product import router as product_router
+from app.api.inventory import router as inventory_router
 
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
@@ -25,6 +26,7 @@ app.include_router(organization_router)
 app.include_router(member_router)
 app.include_router(invitation_router)
 app.include_router(product_router)
+app.include_router(inventory_router)
 @app.get("/")
 def root():
     return {
