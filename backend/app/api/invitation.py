@@ -344,3 +344,74 @@ def revoke_invitation(
     return {
         "message": "Invitation revoked successfully"
     }
+
+@router.post("/{invitation_id}/resend")
+def resend_invitation(
+    organization_id: int,
+    invitation_id: int,
+    membership: Membership = Depends(
+        require_roles(
+            MembershipRole.OWNER,
+            MembershipRole.ADMIN
+        )
+    ),
+    db: Session = Depends(get_db)
+):
+    invitation = db.query(
+        OrganizationInvitation
+    ).filter(
+        OrganizationInvitation.id == invitation_id,
+        OrganizationInvitation.organization_id == organization_id
+    ).first()
+
+    if not invitation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invitation not found"
+        )
+
+    if invitation.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has already been accepted"
+        )
+
+    organization = db.query(Organization).filter(
+        Organization.id == organization_id
+    ).first()
+
+    if not organization:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found"
+        )
+
+    raw_token, token_hash = create_invitation_token()
+
+    invitation.token_hash = token_hash
+    invitation.expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=7)
+    )
+
+    inviter = db.query(User).filter(
+        User.id == membership.user_id
+    ).first()
+
+    invitation_url = (
+        f"{settings.FRONTEND_URL}/invitations/accept"
+        f"?token={raw_token}"
+    )
+
+    send_organization_invitation_email(
+        recipient=invitation.email,
+        organization_name=organization.name,
+        inviter_name=inviter.full_name,
+        role=invitation.role.value,
+        invitation_url=invitation_url
+    )
+
+    db.commit()
+
+    return {
+        "message": "Invitation resent successfully"
+    }
