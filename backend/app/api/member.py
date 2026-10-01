@@ -165,6 +165,8 @@ def update_member_role(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Use the ownership transfer flow to assign ownership"
         )
+    
+    
 
     target_membership.role = data.role
 
