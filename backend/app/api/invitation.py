@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.organization import require_roles
+from app.api.organization import require_roles, get_user_membership
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import create_invitation_token, hash_invitation_token, create_access_token, create_refresh_token, hash_password
@@ -15,6 +15,7 @@ from app.schemas.invitation import CreateInvitationRequest, AcceptInvitationRequ
 from app.services.email import send_organization_invitation_email
 from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
+
 
 
 router = APIRouter(
@@ -278,4 +279,68 @@ def register_with_invitation(
         "token_type": "bearer",
         "organization_id": membership.organization_id,
         "role": membership.role
+    }
+
+@router.get("/")
+def get_organization_invitations(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    invitations = db.query(
+        OrganizationInvitation
+    ).filter(
+        OrganizationInvitation.organization_id == organization_id
+    ).order_by(
+        OrganizationInvitation.created_at.desc()
+    ).all()
+
+    return [
+        {
+            "id": invitation.id,
+            "email": invitation.email,
+            "role": invitation.role,
+            "expires_at": invitation.expires_at,
+            "accepted_at": invitation.accepted_at,
+            "created_at": invitation.created_at
+        }
+        for invitation in invitations
+    ]
+
+@router.delete("/{invitation_id}")
+def revoke_invitation(
+    organization_id: int,
+    invitation_id: int,
+    membership: Membership = Depends(
+        require_roles(
+            MembershipRole.OWNER,
+            MembershipRole.ADMIN
+        )
+    ),
+    db: Session = Depends(get_db)
+):
+    invitation = db.query(
+        OrganizationInvitation
+    ).filter(
+        OrganizationInvitation.id == invitation_id,
+        OrganizationInvitation.organization_id == organization_id
+    ).first()
+
+    if not invitation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invitation not found"
+        )
+
+    if invitation.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has already been accepted"
+        )
+
+    db.delete(invitation)
+    db.commit()
+
+    return {
+        "message": "Invitation revoked successfully"
     }
