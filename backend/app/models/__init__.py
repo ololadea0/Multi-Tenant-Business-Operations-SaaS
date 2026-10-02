@@ -7,3 +7,4 @@ from app.models.invitation import OrganizationInvitation
 from app.models.product import Product
 from app.models.inventory import InventoryMovement
 from app.models.customer import Customer
+from app.models.order import Order, OrderItem
