@@ -183,3 +183,100 @@ def get_order(
         "updated_at": order.updated_at,
         "items": items
     }
+
+@router.post("/{order_id}/cancel")
+def cancel_order(
+    organization_id: int,
+    order_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    if membership.role not in {
+        MembershipRole.OWNER,
+        MembershipRole.ADMIN,
+        MembershipRole.MANAGER
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to cancel orders"
+        )
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.organization_id == organization_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    if order.status == OrderStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order is already cancelled"
+        )
+
+    if order.status == OrderStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Completed orders cannot be cancelled"
+        )
+
+    try:
+        order_items = db.query(OrderItem).filter(
+            OrderItem.order_id == order.id
+        ).all()
+
+        for item in order_items:
+            product = db.query(Product).filter(
+                Product.id == item.product_id,
+                Product.organization_id == organization_id
+            ).first()
+
+            if not product:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Product {item.product_id} not found"
+                )
+
+            previous_stock = product.stock_quantity
+            new_stock = previous_stock + item.quantity
+
+            product.stock_quantity = new_stock
+
+            inventory_movement = InventoryMovement(
+                organization_id=organization_id,
+                product_id=product.id,
+                user_id=membership.user_id,
+                movement_type=InventoryMovementType.IN,
+                quantity=item.quantity,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+                note=f"Order #{order.id} cancellation"
+            )
+
+            db.add(inventory_movement)
+
+        order.status = OrderStatus.CANCELLED
+
+        db.commit()
+        db.refresh(order)
+
+        return {
+            "message": "Order cancelled successfully",
+            "order": order
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cancel order"
+        )
