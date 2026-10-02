@@ -136,3 +136,50 @@ def create_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create order"
         )
+    
+@router.get("/")
+def get_orders(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    orders = db.query(Order).filter(
+        Order.organization_id == organization_id
+    ).order_by(
+        Order.created_at.desc()
+    ).all()
+
+    return orders
+
+@router.get("/{order_id}")
+def get_order(
+    organization_id: int,
+    order_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.organization_id == organization_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    items = db.query(OrderItem).filter(
+        OrderItem.order_id == order.id
+    ).all()
+
+    return {
+        "id": order.id,
+        "customer_id": order.customer_id,
+        "created_by_user_id": order.created_by_user_id,
+        "status": order.status,
+        "total_amount": order.total_amount,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+        "items": items
+    }

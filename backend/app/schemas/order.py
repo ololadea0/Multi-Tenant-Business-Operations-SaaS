@@ -1,3 +1,6 @@
+from datetime import datetime
+from decimal import Decimal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -23,3 +26,29 @@ class OrderCreate(BaseModel):
             )
 
         return self
+    
+class OrderItemResponse(BaseModel):
+    id: int
+    product_id: int
+    quantity: int
+    unit_price: Decimal
+    subtotal: Decimal
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OrderResponse(BaseModel):
+    id: int
+    customer_id: int
+    created_by_user_id: int | None
+    status: str
+    total_amount: Decimal
+    created_at: datetime
+    updated_at: datetime
+    items: list[OrderItemResponse]
+
+    model_config = {
+        "from_attributes": True
+    }
