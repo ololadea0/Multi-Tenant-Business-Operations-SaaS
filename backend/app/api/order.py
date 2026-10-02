@@ -280,3 +280,59 @@ def cancel_order(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cancel order"
         )
+    
+@router.post("/{order_id}/complete")
+def complete_order(
+    organization_id: int,
+    order_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    if membership.role not in {
+        MembershipRole.OWNER,
+        MembershipRole.ADMIN,
+        MembershipRole.MANAGER
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to complete orders"
+        )
+
+    order = db.query(Order).filter(
+        Order.id == order_id,
+        Order.organization_id == organization_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found"
+        )
+
+    if order.status == OrderStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Order is already completed"
+        )
+
+    if order.status == OrderStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cancelled orders cannot be completed"
+        )
+
+    if order.status != OrderStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only confirmed orders can be completed"
+        )
+
+    order.status = OrderStatus.COMPLETED
+
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "message": "Order completed successfully",
+        "order": order
+    }
