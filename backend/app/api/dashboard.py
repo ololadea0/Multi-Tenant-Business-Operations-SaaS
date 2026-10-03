@@ -127,17 +127,49 @@ def get_dashboard(
         organization_id,
         month_start
     )
+    low_stock_items = db.query(Product).filter(
+        Product.organization_id == organization_id,
+        Product.stock_quantity <= Product.low_stock_threshold
+    ).order_by(
+        Product.stock_quantity.asc()
+    ).limit(10).all()
+
+    recent_orders = db.query(Order).filter(
+        Order.organization_id == organization_id
+    ).order_by(
+        Order.created_at.desc()
+    ).limit(10).all()
 
     return {
-        "overview": {
-            "total_customers": total_customers,
-            "total_products": total_products,
-            "total_orders": total_orders,
-            "completed_orders": completed_orders,
-            "total_revenue": total_revenue,
-            "low_stock_products": low_stock_products
-        },
-        "today": today,
-        "this_week": this_week,
-        "this_month": this_month
-    }
+    "overview": {
+        "total_customers": total_customers,
+        "total_products": total_products,
+        "total_orders": total_orders,
+        "completed_orders": completed_orders,
+        "total_revenue": total_revenue,
+        "low_stock_products": low_stock_products
+    },
+    "today": today,
+    "this_week": this_week,
+    "this_month": this_month,
+    "low_stock_items": [
+        {
+            "id": product.id,
+            "name": product.name,
+            "sku": product.sku,
+            "stock_quantity": product.stock_quantity,
+            "low_stock_threshold": product.low_stock_threshold
+        }
+        for product in low_stock_items
+    ],
+    "recent_orders": [
+        {
+            "id": order.id,
+            "customer_id": order.customer_id,
+            "status": order.status,
+            "total_amount": order.total_amount,
+            "created_at": order.created_at
+        }
+        for order in recent_orders
+    ]
+}
