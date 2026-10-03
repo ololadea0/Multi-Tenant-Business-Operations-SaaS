@@ -87,7 +87,7 @@ def create_order(
                     detail=f"Insufficient stock for {product.name}"
                 )
 
-            unit_price = product.price
+            unit_price = product.unit_price
             subtotal = unit_price * item_data.quantity
 
             order_item = OrderItem(

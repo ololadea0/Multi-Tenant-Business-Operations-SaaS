@@ -47,7 +47,8 @@ def create_product(
         sku=data.sku,
         description=data.description,
         unit_price=data.unit_price,
-        stock_quantity=data.stock_quantity
+        stock_quantity=data.stock_quantity,
+        low_stock_threshold=data.low_stock_threshold
     )
 
     db.add(product)

@@ -29,3 +29,7 @@ class ProductUpdate(BaseModel):
         default=None,
         ge=0
     )
+    low_stock_threshold: int | None = Field(
+        default=None,
+        ge=0
+    )

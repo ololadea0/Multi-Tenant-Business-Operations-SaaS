@@ -45,6 +45,11 @@ class Product(Base):
         nullable=False
     )
 
+    low_stock_threshold: Mapped[int] = mapped_column(
+        default=10,
+        nullable=False
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
