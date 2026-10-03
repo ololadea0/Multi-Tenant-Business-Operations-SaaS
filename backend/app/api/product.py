@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.organization import get_user_membership
 from app.core.database import get_db
+from app.models.inventory import InventoryMovement, InventoryMovementType
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
@@ -52,6 +53,22 @@ def create_product(
     )
 
     db.add(product)
+    db.flush()
+
+    if data.stock_quantity > 0:
+        movement = InventoryMovement(
+            organization_id=organization_id,
+            product_id=product.id,
+            user_id=membership.user_id,
+            movement_type=InventoryMovementType.IN,
+            quantity=data.stock_quantity,
+            previous_stock=0,
+            new_stock=data.stock_quantity,
+            note="Initial stock"
+        )
+
+        db.add(movement)
+
     db.commit()
     db.refresh(product)
 

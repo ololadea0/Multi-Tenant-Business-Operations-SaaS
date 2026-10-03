@@ -16,6 +16,7 @@ from app.models.inventory import (
     InventoryMovement,
     InventoryMovementType,
 )
+from app.services.inventory import change_stock
 
 
 router = APIRouter(
@@ -71,20 +72,12 @@ def create_order(
             product = db.query(Product).filter(
                 Product.id == item_data.product_id,
                 Product.organization_id == organization_id
-            ).first()
+            ).with_for_update().first()
 
             if not product:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Product {item_data.product_id} not found"
-                )
-
-            previous_stock = product.stock_quantity
-
-            if previous_stock < item_data.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Insufficient stock for {product.name}"
                 )
 
             unit_price = product.unit_price
@@ -100,22 +93,15 @@ def create_order(
 
             db.add(order_item)
 
-            new_stock = previous_stock - item_data.quantity
-
-            product.stock_quantity = new_stock
-
-            inventory_movement = InventoryMovement(
+            change_stock(
+                db=db,
                 organization_id=organization_id,
-                product_id=product.id,
-                user_id=membership.user_id,
+                product=product,
                 movement_type=InventoryMovementType.OUT,
                 quantity=item_data.quantity,
-                previous_stock=previous_stock,
-                new_stock=new_stock,
+                user_id=membership.user_id,
                 note=f"Order #{order.id}"
             )
-
-            db.add(inventory_movement)
 
             total_amount += subtotal
 
@@ -287,7 +273,7 @@ def cancel_order(
             product = db.query(Product).filter(
                 Product.id == item.product_id,
                 Product.organization_id == organization_id
-            ).first()
+            ).with_for_update().first()
 
             if not product:
                 raise HTTPException(
@@ -295,23 +281,15 @@ def cancel_order(
                     detail=f"Product {item.product_id} not found"
                 )
 
-            previous_stock = product.stock_quantity
-            new_stock = previous_stock + item.quantity
-
-            product.stock_quantity = new_stock
-
-            inventory_movement = InventoryMovement(
+            change_stock(
+                db=db,
                 organization_id=organization_id,
-                product_id=product.id,
-                user_id=membership.user_id,
+                product=product,
                 movement_type=InventoryMovementType.IN,
                 quantity=item.quantity,
-                previous_stock=previous_stock,
-                new_stock=new_stock,
+                user_id=membership.user_id,
                 note=f"Order #{order.id} cancellation"
             )
-
-            db.add(inventory_movement)
 
         order.status = OrderStatus.CANCELLED
 

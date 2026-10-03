@@ -2,11 +2,26 @@ from pydantic import BaseModel, Field
 
 
 class ProductCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    sku: str = Field(min_length=1, max_length=100)
+    name: str = Field(
+        min_length=1,
+        max_length=255
+    )
+    sku: str = Field(
+        min_length=1,
+        max_length=100
+    )
     description: str | None = None
-    unit_price: float = Field(ge=0)
-    stock_quantity: int = Field(default=0, ge=0)
+    unit_price: float = Field(
+        ge=0
+    )
+    stock_quantity: int = Field(
+        default=0,
+        ge=0
+    )
+    low_stock_threshold: int = Field(
+        default=10,
+        ge=0
+    )
 
 
 class ProductUpdate(BaseModel):
@@ -22,10 +37,6 @@ class ProductUpdate(BaseModel):
     )
     description: str | None = None
     unit_price: float | None = Field(
-        default=None,
-        ge=0
-    )
-    stock_quantity: int | None = Field(
         default=None,
         ge=0
     )

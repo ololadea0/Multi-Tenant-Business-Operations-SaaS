@@ -10,6 +10,7 @@ from app.models.inventory import (
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product
 from app.schemas.inventory import InventoryMovementCreate
+from app.services.inventory import change_stock
 
 
 router = APIRouter(
@@ -87,20 +88,16 @@ def create_inventory_movement(
                 detail="Adjustment cannot reduce stock below zero"
             )
 
-    movement = InventoryMovement(
+    movement = change_stock(
+        db=db,
         organization_id=organization_id,
-        product_id=product_id,
-        user_id=membership.user_id,
+        product=product,
         movement_type=data.movement_type,
         quantity=data.quantity,
-        previous_stock=previous_stock,
-        new_stock=new_stock,
+        user_id=membership.user_id,
         note=data.note
     )
 
-    product.stock_quantity = new_stock
-
-    db.add(movement)
     db.commit()
     db.refresh(movement)
 
@@ -109,7 +106,6 @@ def create_inventory_movement(
         "movement": movement,
         "current_stock": product.stock_quantity
     }
-
 
 @router.get("/")
 def get_inventory_movements(
