@@ -144,7 +144,8 @@ def create_order(
 @router.get("/")
 def get_orders(
     organization_id: int,
-    status_filter: Optional[OrderStatus] = None,
+    status_filter: OrderStatus | None = None,
+    search: str | None = None,
     page: int = 1,
     limit: int = 20,
     membership: Membership = Depends(get_user_membership),
@@ -162,13 +163,26 @@ def get_orders(
             detail="Limit must be between 1 and 100"
         )
 
-    query = db.query(Order).filter(
-        Order.organization_id == organization_id
+    query = db.query(Order).join(
+        Customer,
+        Order.customer_id == Customer.id
+    ).filter(
+        Order.organization_id == organization_id,
+        Customer.organization_id == organization_id
     )
 
     if status_filter:
         query = query.filter(
             Order.status == status_filter
+        )
+
+    if search:
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            Customer.name.ilike(search_term)
+            | Customer.email.ilike(search_term)
+            | Customer.phone.ilike(search_term)
         )
 
     total = query.count()
@@ -190,6 +204,7 @@ def get_orders(
         "total": total,
         "total_pages": (total + limit - 1) // limit
     }
+
 @router.get("/{order_id}")
 def get_order(
     organization_id: int,
