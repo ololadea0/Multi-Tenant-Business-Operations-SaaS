@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from typing import Optional
+
+from sqlalchemy import func
+
 from app.api.organization import get_user_membership
 from app.core.database import get_db
 from app.models.customer import Customer
@@ -140,17 +144,52 @@ def create_order(
 @router.get("/")
 def get_orders(
     organization_id: int,
+    status_filter: Optional[OrderStatus] = None,
+    page: int = 1,
+    limit: int = 20,
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
-    orders = db.query(Order).filter(
+    if page < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Page must be greater than 0"
+        )
+
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be between 1 and 100"
+        )
+
+    query = db.query(Order).filter(
         Order.organization_id == organization_id
-    ).order_by(
+    )
+
+    if status_filter:
+        query = query.filter(
+            Order.status == status_filter
+        )
+
+    total = query.count()
+
+    offset = (page - 1) * limit
+
+    orders = query.order_by(
         Order.created_at.desc()
+    ).offset(
+        offset
+    ).limit(
+        limit
     ).all()
 
-    return orders
-
+    return {
+        "items": orders,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": (total + limit - 1) // limit
+    }
 @router.get("/{order_id}")
 def get_order(
     organization_id: int,
