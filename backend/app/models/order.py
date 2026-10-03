@@ -2,6 +2,7 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
@@ -21,6 +22,13 @@ class OrderStatus(str, Enum):
 
 class Order(Base):
     __tablename__ = "orders"
+
+    __table_args__ = (
+        CheckConstraint(
+            "total_amount >= 0",
+            name="ck_order_total_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True
@@ -79,6 +87,21 @@ class Order(Base):
 
 class OrderItem(Base):
     __tablename__ = "order_items"
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_order_item_quantity_positive"
+        ),
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_order_item_unit_price_non_negative"
+        ),
+        CheckConstraint(
+            "subtotal >= 0",
+            name="ck_order_item_subtotal_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True

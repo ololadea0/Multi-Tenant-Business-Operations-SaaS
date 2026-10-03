@@ -2,6 +2,7 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
@@ -21,6 +22,21 @@ class InventoryMovementType(str, Enum):
 
 class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity <> 0",
+            name="ck_inventory_quantity_non_zero"
+        ),
+        CheckConstraint(
+            "previous_stock >= 0",
+            name="ck_inventory_previous_stock_non_negative"
+        ),
+        CheckConstraint(
+            "new_stock >= 0",
+            name="ck_inventory_new_stock_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True

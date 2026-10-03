@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -8,6 +15,21 @@ from app.core.database import Base
 
 class Product(Base):
     __tablename__ = "products"
+
+    __table_args__ = (
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_product_unit_price_non_negative"
+        ),
+        CheckConstraint(
+            "stock_quantity >= 0",
+            name="ck_product_stock_non_negative"
+        ),
+        CheckConstraint(
+            "low_stock_threshold >= 0",
+            name="ck_product_low_stock_threshold_non_negative"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
