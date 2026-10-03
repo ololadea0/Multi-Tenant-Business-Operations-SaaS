@@ -18,12 +18,56 @@ router = APIRouter(
 )
 
 
+def get_period_stats(
+    db: Session,
+    organization_id: int,
+    start_date: datetime
+):
+    orders = db.query(Order).filter(
+        Order.organization_id == organization_id,
+        Order.status == OrderStatus.COMPLETED,
+        Order.created_at >= start_date
+    )
+
+    order_count = orders.count()
+
+    revenue = orders.with_entities(
+        func.coalesce(
+            func.sum(Order.total_amount),
+            0
+        )
+    ).scalar()
+
+    return {
+        "orders": order_count,
+        "revenue": revenue
+    }
+
+
 @router.get("/")
 def get_dashboard(
     organization_id: int,
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
+    now = datetime.utcnow()
+
+    today_start = datetime(
+        now.year,
+        now.month,
+        now.day
+    )
+
+    week_start = today_start - timedelta(
+        days=today_start.weekday()
+    )
+
+    month_start = datetime(
+        now.year,
+        now.month,
+        1
+    )
+
     total_customers = db.query(
         func.count(Customer.id)
     ).filter(
@@ -66,11 +110,34 @@ def get_dashboard(
         Product.stock_quantity <= Product.low_stock_threshold
     ).scalar()
 
+    today = get_period_stats(
+        db,
+        organization_id,
+        today_start
+    )
+
+    this_week = get_period_stats(
+        db,
+        organization_id,
+        week_start
+    )
+
+    this_month = get_period_stats(
+        db,
+        organization_id,
+        month_start
+    )
+
     return {
-        "total_customers": total_customers,
-        "total_products": total_products,
-        "total_orders": total_orders,
-        "completed_orders": completed_orders,
-        "total_revenue": total_revenue,
-        "low_stock_products": low_stock_products
+        "overview": {
+            "total_customers": total_customers,
+            "total_products": total_products,
+            "total_orders": total_orders,
+            "completed_orders": completed_orders,
+            "total_revenue": total_revenue,
+            "low_stock_products": low_stock_products
+        },
+        "today": today,
+        "this_week": this_week,
+        "this_month": this_month
     }
