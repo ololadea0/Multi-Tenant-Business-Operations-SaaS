@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.models.customer import Customer
 from app.models.membership import Membership, MembershipRole
 from app.models.order import Order, OrderItem, OrderStatus
-from app.models.product import Product
+from app.models.product import Product, ProductStatus
 from app.schemas.order import OrderCreate
 from app.models.inventory import (
     InventoryMovement,
@@ -76,7 +76,8 @@ def create_order(
                 db.query(Product)
                 .filter(
                     Product.id == product_id,
-                    Product.organization_id == organization_id
+                    Product.organization_id == organization_id,
+                    Product.status == ProductStatus.ACTIVE
                 )
                 .with_for_update()
                 .first()

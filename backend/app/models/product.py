@@ -1,9 +1,11 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Enum as SQLEnum,
     ForeignKey,
     Numeric,
     String,
@@ -12,6 +14,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+
+
+class ProductStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
 
 
 class Product(Base):
@@ -70,6 +77,12 @@ class Product(Base):
 
     low_stock_threshold: Mapped[int] = mapped_column(
         default=10,
+        nullable=False
+    )
+
+    status: Mapped[ProductStatus] = mapped_column(
+        SQLEnum(ProductStatus),
+        default=ProductStatus.ACTIVE,
         nullable=False
     )
 

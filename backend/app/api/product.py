@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -8,8 +8,8 @@ from app.api.organization import get_user_membership
 from app.core.database import get_db
 from app.models.inventory import InventoryMovement, InventoryMovementType
 from app.models.membership import Membership, MembershipRole
-from app.models.product import Product
-from app.schemas.product import ProductCreate, ProductUpdate
+from app.models.product import Product, ProductStatus
+from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ router = APIRouter(
     tags=["Products"]
 )
 
-@router.post("/")
+@router.post("/", response_model=ProductResponse)
 def create_product(
     organization_id: int,
     data: ProductCreate,
@@ -102,19 +102,50 @@ def create_product(
 
     return product
 
-@router.get("/")
+@router.get("/", response_model=list[ProductResponse])
 def get_products(
     organization_id: int,
+    search: str | None = Query(default=None, min_length=1),
+    product_status: ProductStatus | None = Query(default=None),
+    low_stock: bool = False,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
-    products = db.query(Product).filter(
+    query = db.query(Product).filter(
         Product.organization_id == organization_id
+    )
+
+    if search:
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            Product.name.ilike(search_term) |
+            Product.sku.ilike(search_term)
+        )
+
+    if product_status:
+        query = query.filter(
+            Product.status == product_status
+        )
+
+    if low_stock:
+        query = query.filter(
+            Product.stock_quantity <= Product.low_stock_threshold
+        )
+
+    products = query.order_by(
+        Product.created_at.desc()
+    ).offset(
+        (page - 1) * limit
+    ).limit(
+        limit
     ).all()
 
     return products
 
-@router.get("/{product_id}")
+@router.get("/{product_id}", response_model=ProductResponse)
 def get_product(
     organization_id: int,
     product_id: int,
@@ -134,7 +165,7 @@ def get_product(
 
     return product
 
-@router.patch("/{product_id}")
+@router.patch("/{product_id}", response_model=ProductResponse)
 def update_product(
     organization_id: int,
     product_id: int,
@@ -205,6 +236,55 @@ def update_product(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update product. Please try again."
+        )
+
+    return product
+
+@router.patch("/{product_id}/status", response_model=ProductResponse)
+def update_product_status(
+    organization_id: int,
+    product_id: int,
+    product_status: ProductStatus,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    if membership.role not in {
+        MembershipRole.OWNER,
+        MembershipRole.ADMIN
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to change product status"
+        )
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.organization_id == organization_id
+    ).first()
+
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found."
+        )
+
+    product.status = product_status
+
+    try:
+        db.commit()
+        db.refresh(product)
+    except SQLAlchemyError:
+        db.rollback()
+
+        logger.exception(
+            "Database error while changing status for product id=%s organization_id=%s",
+            product_id,
+            organization_id,
+        )
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update product status. Please try again."
         )
 
     return product
