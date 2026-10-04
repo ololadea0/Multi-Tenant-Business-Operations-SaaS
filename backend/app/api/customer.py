@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -6,6 +6,7 @@ from app.api.organization import get_user_membership
 from app.core.database import get_db
 from app.models.customer import Customer
 from app.models.membership import Membership, MembershipRole
+from app.models.order import Order
 from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
@@ -65,16 +66,87 @@ def create_customer(
 @router.get("/")
 def get_customers(
     organization_id: int,
+    search: str | None = Query(default=None, min_length=1),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
-    customers = db.query(Customer).filter(
+    query = db.query(Customer).filter(
         Customer.organization_id == organization_id
-    ).order_by(
-        Customer.created_at.desc()
+    )
+
+    if search:
+        search_term = f"%{search.strip()}%"
+
+        query = query.filter(
+            Customer.name.ilike(search_term) |
+            Customer.email.ilike(search_term) |
+            Customer.phone.ilike(search_term)
+        )
+
+    total = query.count()
+
+    customers = query.order_by(
+        Customer.created_at.desc(),
+        Customer.id.desc()
+    ).offset(
+        (page - 1) * limit
+    ).limit(
+        limit
     ).all()
 
-    return customers
+    return {
+        "items": customers,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
+
+@router.get("/{customer_id}/orders")
+def get_customer_orders(
+    organization_id: int,
+    customer_id: int,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    customer = db.query(Customer).filter(
+        Customer.id == customer_id,
+        Customer.organization_id == organization_id
+    ).first()
+
+    if not customer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Customer not found"
+        )
+
+    query = db.query(Order).filter(
+        Order.organization_id == organization_id,
+        Order.customer_id == customer_id
+    )
+
+    total = query.count()
+
+    orders = query.order_by(
+        Order.created_at.desc(),
+        Order.id.desc()
+    ).offset(
+        (page - 1) * limit
+    ).limit(
+        limit
+    ).all()
+
+    return {
+        "items": orders,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
 
 @router.get("/{customer_id}")
 def get_customer(

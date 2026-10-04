@@ -31,9 +31,12 @@ def test_list_customers(authenticated_client, organization, customer):
 
     data = response.json()
 
-    assert len(data) == 1
-    assert data[0]["id"] == customer.id
-    assert data[0]["name"] == customer.name
+    assert data["page"] == 1
+    assert data["limit"] == 20
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == customer.id
+    assert data["items"][0]["name"] == customer.name
 
 
 def test_get_customer(authenticated_client, organization, customer):
