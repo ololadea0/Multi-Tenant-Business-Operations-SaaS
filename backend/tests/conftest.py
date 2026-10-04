@@ -116,6 +116,15 @@ def authenticated_client(client, user):
     return client
 
 @pytest.fixture
+def staff_authenticated_client(client, staff_user):
+    def override_current_user():
+        return staff_user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    return client
+
+@pytest.fixture
 def staff_user(db, organization):
     user = User(
         email="staff@example.com",
