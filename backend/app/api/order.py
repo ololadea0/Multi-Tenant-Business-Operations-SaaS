@@ -68,14 +68,19 @@ def create_order(
         db.add(order)
         db.flush()
 
-        total_amount = Decimal("0.00")
+        product_ids = sorted({item.product_id for item in data.items})
+        locked_products = {}
 
-        for item_data in data.items:
-
-            product = db.query(Product).filter(
-                Product.id == item_data.product_id,
-                Product.organization_id == organization_id
-            ).with_for_update().first()
+        for product_id in product_ids:
+            product = (
+                db.query(Product)
+                .filter(
+                    Product.id == product_id,
+                    Product.organization_id == organization_id
+                )
+                .with_for_update()
+                .first()
+            )
 
             if not product:
                 raise HTTPException(
@@ -83,6 +88,12 @@ def create_order(
                     detail="Product not found."
                 )
 
+            locked_products[product_id] = product
+
+        total_amount = Decimal("0.00")
+
+        for item_data in data.items:
+            product = locked_products[item_data.product_id]
             unit_price = product.unit_price
             subtotal = unit_price * item_data.quantity
 
@@ -245,10 +256,15 @@ def cancel_order(
             detail="You do not have permission to cancel orders"
         )
 
-    order = db.query(Order).filter(
-        Order.id == order_id,
-        Order.organization_id == organization_id
-    ).first()
+    order = (
+        db.query(Order)
+        .filter(
+            Order.id == order_id,
+            Order.organization_id == organization_id
+        )
+        .with_for_update()
+        .first()
+    )
 
     if not order:
         raise HTTPException(
@@ -271,13 +287,18 @@ def cancel_order(
     try:
         order_items = db.query(OrderItem).filter(
             OrderItem.order_id == order.id
-        ).all()
+        ).order_by(OrderItem.product_id).all()
 
         for item in order_items:
-            product = db.query(Product).filter(
-                Product.id == item.product_id,
-                Product.organization_id == organization_id
-            ).with_for_update().first()
+            product = (
+                db.query(Product)
+                .filter(
+                    Product.id == item.product_id,
+                    Product.organization_id == organization_id
+                )
+                .with_for_update()
+                .first()
+            )
 
             if not product:
                 raise HTTPException(
@@ -292,7 +313,7 @@ def cancel_order(
                 movement_type=InventoryMovementType.IN,
                 quantity=item.quantity,
                 user_id=membership.user_id,
-                note=f"Order #{order.id} cancellation"
+                note=f"Stock restored from cancelled order #{order.id}"
             )
 
         order.status = OrderStatus.CANCELLED
@@ -335,10 +356,15 @@ def complete_order(
             detail="You do not have permission to complete orders"
         )
 
-    order = db.query(Order).filter(
-        Order.id == order_id,
-        Order.organization_id == organization_id
-    ).first()
+    order = (
+        db.query(Order)
+        .filter(
+            Order.id == order_id,
+            Order.organization_id == organization_id
+        )
+        .with_for_update()
+        .first()
+    )
 
     if not order:
         raise HTTPException(

@@ -51,7 +51,7 @@ def change_stock(
         if previous_stock < quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient stock for product '{product.name}'."
+                detail="Insufficient stock"
             )
 
         new_stock = previous_stock - quantity
@@ -62,7 +62,7 @@ def change_stock(
         if new_stock < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Adjustment cannot reduce stock below zero."
+                detail="Adjustment cannot reduce stock below zero"
             )
 
     else:

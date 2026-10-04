@@ -9,10 +9,9 @@ class InventoryMovementType(str, Enum):
     ADJUSTMENT = "adjustment"
 
 
-
 class InventoryMovementCreate(BaseModel):
     movement_type: InventoryMovementType
-    quantity: int = Field(ne=0)
+    quantity: int
     note: str | None = Field(
         default=None,
         max_length=500
