@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -60,13 +62,13 @@ def create_order(
             customer_id=customer.id,
             created_by_user_id=membership.user_id,
             status=OrderStatus.CONFIRMED,
-            total_amount=0
+            total_amount=Decimal("0.00")
         )
 
         db.add(order)
         db.flush()
 
-        total_amount = 0
+        total_amount = Decimal("0.00")
 
         for item_data in data.items:
 

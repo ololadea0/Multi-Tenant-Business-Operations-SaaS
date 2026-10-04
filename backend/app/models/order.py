@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 
 from sqlalchemy import (
@@ -66,9 +67,9 @@ class Order(Base):
         nullable=False
     )
 
-    total_amount: Mapped[float] = mapped_column(
+    total_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
-        default=0,
+        default=Decimal("0.00"),
         nullable=False
     )
 
@@ -129,12 +130,12 @@ class OrderItem(Base):
         nullable=False
     )
 
-    unit_price: Mapped[float] = mapped_column(
+    unit_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False
     )
 
-    subtotal: Mapped[float] = mapped_column(
+    subtotal: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False
     )
