@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.organization import require_roles
+from app.api.organization import get_user_membership, require_roles
 from app.core.database import get_db
 from app.models.membership import Membership, MembershipRole
 from app.models.user import User
@@ -17,6 +17,29 @@ router = APIRouter(
 )
 
 
+@router.get("/")
+def list_members(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    members = (
+        db.query(Membership)
+        .filter(
+            Membership.organization_id == organization_id
+        )
+        .all()
+    )
+
+    return [
+        {
+            "user_id": member.user_id,
+            "email": member.user.email,
+            "full_name": member.user.full_name,
+            "role": member.role,
+        }
+        for member in members
+    ]
 
 @router.post("/")
 def add_member(

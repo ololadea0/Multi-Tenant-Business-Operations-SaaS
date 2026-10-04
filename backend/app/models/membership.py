@@ -2,9 +2,10 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.models.user import User
 
 
 class MembershipRole(str, Enum):
@@ -34,6 +35,8 @@ class Membership(Base):
         default=MembershipRole.STAFF,
         nullable=False
     )
+
+    user: Mapped["User"] = relationship("User")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
