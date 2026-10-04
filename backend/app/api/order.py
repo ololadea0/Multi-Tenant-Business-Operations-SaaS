@@ -129,6 +129,9 @@ def create_order(
             "order": order
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -326,6 +329,9 @@ def cancel_order(
             "order": order
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
     except IntegrityError:
         db.rollback()
         raise HTTPException(

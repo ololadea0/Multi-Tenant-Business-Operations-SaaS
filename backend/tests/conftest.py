@@ -15,6 +15,12 @@ from app.models.user import User
 from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
 from app.api.dependencies import get_current_user
+from decimal import Decimal
+
+from app.models.customer import Customer
+
+from app.models.product import Product
+
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
@@ -157,3 +163,35 @@ def test_staff_cannot_create_product(
     assert response.status_code == 403
 
     app.dependency_overrides.clear()
+
+@pytest.fixture
+def customer(db, organization):
+    customer = Customer(
+        organization_id=organization.id,
+        name="Test Customer",
+        email="customer@example.com",
+        phone="08012345678",
+    )
+
+    db.add(customer)
+    db.commit()
+    db.refresh(customer)
+
+    return customer
+
+@pytest.fixture
+def product(db, organization):
+    product = Product(
+        organization_id=organization.id,
+        name="Test Laptop",
+        sku="LAP-TEST-001",
+        unit_price=Decimal("250000.00"),
+        stock_quantity=10,
+        low_stock_threshold=2,
+    )
+
+    db.add(product)
+    db.commit()
+    db.refresh(product)
+
+    return product
