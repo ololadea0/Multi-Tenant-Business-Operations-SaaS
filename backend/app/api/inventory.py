@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.organization import get_user_membership
@@ -53,7 +54,7 @@ def create_inventory_movement(
         if data.quantity <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Stock-in quantity must be positive"
+                detail="Stock-in quantity must be positive."
             )
 
         new_stock = previous_stock + data.quantity
@@ -62,13 +63,13 @@ def create_inventory_movement(
         if data.quantity <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Stock-out quantity must be positive"
+                detail="Stock-out quantity must be positive."
             )
 
         if previous_stock < data.quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Insufficient stock"
+                detail=f"Insufficient stock for product '{product.name}'."
             )
 
         new_stock = previous_stock - data.quantity
@@ -77,7 +78,7 @@ def create_inventory_movement(
         if data.quantity == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Adjustment quantity cannot be zero"
+                detail="Adjustment quantity cannot be zero."
             )
 
         new_stock = previous_stock + data.quantity
@@ -85,7 +86,7 @@ def create_inventory_movement(
         if new_stock < 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Adjustment cannot reduce stock below zero"
+                detail="Adjustment cannot reduce stock below zero."
             )
 
     movement = change_stock(
@@ -98,8 +99,21 @@ def create_inventory_movement(
         note=data.note
     )
 
-    db.commit()
-    db.refresh(movement)
+    try:
+        db.commit()
+        db.refresh(movement)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The inventory movement could not be recorded because of a data conflict."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record inventory movement. Please try again."
+        )
 
     return {
         "message": "Inventory updated successfully",

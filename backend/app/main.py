@@ -1,7 +1,23 @@
+import logging
+
 from fastapi import FastAPI
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+
+from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from app.core.errors import (
+    integrity_error_handler,
+    database_error_handler,
+    unexpected_error_handler,
+)
 
 from app.core.database import engine
 from app.api.auth import router as auth_router
@@ -17,6 +33,21 @@ from app.api.dashboard import router as dashboard_router
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
     version="1.0.0"
+)
+
+app.add_exception_handler(
+    IntegrityError,
+    integrity_error_handler
+)
+
+app.add_exception_handler(
+    SQLAlchemyError,
+    database_error_handler
+)
+
+app.add_exception_handler(
+    Exception,
+    unexpected_error_handler
 )
 
 app.add_middleware(

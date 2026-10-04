@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from typing import Optional
@@ -77,7 +78,7 @@ def create_order(
             if not product:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Product {item_data.product_id} not found"
+                    detail="Product not found."
                 )
 
             unit_price = product.unit_price
@@ -115,16 +116,17 @@ def create_order(
             "order": order
         }
 
-    except HTTPException:
+    except IntegrityError:
         db.rollback()
-        raise
-
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The order could not be created because of a data conflict."
+        )
+    except SQLAlchemyError:
         db.rollback()
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create order"
+            detail="Failed to create order. Please try again."
         )
     
 @router.get("/")
@@ -278,7 +280,7 @@ def cancel_order(
             if not product:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Product {item.product_id} not found"
+                    detail="Product not found."
                 )
 
             change_stock(
@@ -301,16 +303,17 @@ def cancel_order(
             "order": order
         }
 
-    except HTTPException:
+    except IntegrityError:
         db.rollback()
-        raise
-
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The order could not be cancelled because of a data conflict."
+        )
+    except SQLAlchemyError:
         db.rollback()
-
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cancel order"
+            detail="Failed to cancel order. Please try again."
         )
     
 @router.post("/{order_id}/complete")

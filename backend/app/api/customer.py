@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.organization import get_user_membership
@@ -42,8 +43,22 @@ def create_customer(
     )
 
     db.add(customer)
-    db.commit()
-    db.refresh(customer)
+
+    try:
+        db.commit()
+        db.refresh(customer)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This customer cannot be modified because of an existing data conflict."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save customer. Please try again."
+        )
 
     return customer
 
@@ -117,8 +132,21 @@ def update_customer(
     for field, value in update_data.items():
         setattr(customer, field, value)
 
-    db.commit()
-    db.refresh(customer)
+    try:
+        db.commit()
+        db.refresh(customer)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This customer cannot be modified because of an existing data conflict."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save customer. Please try again."
+        )
 
     return customer
 
@@ -149,8 +177,21 @@ def delete_customer(
             detail="Customer not found"
         )
 
-    db.delete(customer)
-    db.commit()
+    try:
+        db.delete(customer)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This customer cannot be modified because of an existing data conflict."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete customer. Please try again."
+        )
 
     return {
         "message": "Customer deleted successfully"

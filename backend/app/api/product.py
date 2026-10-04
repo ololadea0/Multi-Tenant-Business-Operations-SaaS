@@ -1,4 +1,7 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.organization import get_user_membership
@@ -7,6 +10,8 @@ from app.models.inventory import InventoryMovement, InventoryMovementType
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -39,7 +44,7 @@ def create_product(
     if existing_product:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A product with this SKU already exists"
+            detail="A product with this SKU already exists in this organization."
         )
 
     product = Product(
@@ -69,8 +74,31 @@ def create_product(
 
         db.add(movement)
 
-    db.commit()
-    db.refresh(product)
+    try:
+        db.commit()
+        db.refresh(product)
+    except IntegrityError:
+        db.rollback()
+        logger.exception(
+            "Database integrity error while creating product for organization_id=%s sku=%s",
+            organization_id,
+            data.sku,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A product with this SKU already exists in this organization."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "Database error while creating product for organization_id=%s sku=%s",
+            organization_id,
+            data.sku,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create product. Please try again."
+        )
 
     return product
 
@@ -101,7 +129,7 @@ def get_product(
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
+            detail="Product not found."
         )
 
     return product
@@ -132,7 +160,7 @@ def update_product(
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
+            detail="Product not found."
         )
 
     update_data = data.model_dump(exclude_unset=True)
@@ -147,14 +175,37 @@ def update_product(
         if existing_product:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A product with this SKU already exists"
+                detail="A product with this SKU already exists in this organization."
             )
 
     for field, value in update_data.items():
         setattr(product, field, value)
 
-    db.commit()
-    db.refresh(product)
+    try:
+        db.commit()
+        db.refresh(product)
+    except IntegrityError:
+        db.rollback()
+        logger.exception(
+            "Database integrity error while updating product id=%s organization_id=%s",
+            product_id,
+            organization_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A product with this SKU already exists in this organization."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "Database error while updating product id=%s organization_id=%s",
+            product_id,
+            organization_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update product. Please try again."
+        )
 
     return product
 
@@ -182,11 +233,34 @@ def delete_product(
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found"
+            detail="Product not found."
         )
 
-    db.delete(product)
-    db.commit()
+    try:
+        db.delete(product)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.exception(
+            "Database integrity error while deleting product id=%s organization_id=%s",
+            product_id,
+            organization_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This product cannot be deleted because it is being used by existing records."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception(
+            "Database error while deleting product id=%s organization_id=%s",
+            product_id,
+            organization_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete product. Please try again."
+        )
 
     return {
         "message": "Product deleted successfully"
