@@ -145,6 +145,22 @@ def get_products(
 
     return products
 
+@router.get("/low-stock", response_model=list[ProductResponse])
+def get_low_stock_products(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    products = db.query(Product).filter(
+        Product.organization_id == organization_id,
+        Product.status == ProductStatus.ACTIVE,
+        Product.stock_quantity <= Product.low_stock_threshold
+    ).order_by(
+        Product.stock_quantity.asc()
+    ).all()
+
+    return products
+
 @router.get("/{product_id}", response_model=ProductResponse)
 def get_product(
     organization_id: int,

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,7 @@ from app.models.inventory import (
     InventoryMovementType,
 )
 from app.models.membership import Membership, MembershipRole
-from app.models.product import Product
+from app.models.product import Product, ProductStatus
 from app.schemas.inventory import InventoryMovementCreate
 from app.services.inventory import change_stock
 
@@ -18,6 +18,46 @@ router = APIRouter(
     prefix="/api/organizations/{organization_id}/products/{product_id}/inventory",
     tags=["Inventory"]
 )
+
+summary_router = APIRouter(
+    prefix="/api/organizations/{organization_id}/inventory",
+    tags=["Inventory"]
+)
+
+
+@summary_router.get("/summary")
+def get_inventory_summary(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    products = db.query(Product).filter(
+        Product.organization_id == organization_id,
+        Product.status == ProductStatus.ACTIVE
+    ).all()
+
+    total_products = len(products)
+    total_stock_units = sum(
+        product.stock_quantity
+        for product in products
+    )
+    low_stock_products = sum(
+        1
+        for product in products
+        if product.stock_quantity <= product.low_stock_threshold
+    )
+    out_of_stock_products = sum(
+        1
+        for product in products
+        if product.stock_quantity == 0
+    )
+
+    return {
+        "total_products": total_products,
+        "total_stock_units": total_stock_units,
+        "low_stock_products": low_stock_products,
+        "out_of_stock_products": out_of_stock_products
+    }
 
 @router.post("/")
 def create_inventory_movement(
@@ -125,6 +165,8 @@ def create_inventory_movement(
 def get_inventory_movements(
     organization_id: int,
     product_id: int,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
@@ -139,13 +181,26 @@ def get_inventory_movements(
             detail="Product not found"
         )
 
-    movements = db.query(
-        InventoryMovement
-    ).filter(
+    query = db.query(InventoryMovement).filter(
         InventoryMovement.organization_id == organization_id,
         InventoryMovement.product_id == product_id
-    ).order_by(
-        InventoryMovement.created_at.desc()
+    )
+
+    total = query.count()
+
+    movements = query.order_by(
+        InventoryMovement.created_at.desc(),
+        InventoryMovement.id.desc()
+    ).offset(
+        (page - 1) * limit
+    ).limit(
+        limit
     ).all()
 
-    return movements
+    return {
+        "items": movements,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": (total + limit - 1) // limit
+    }
