@@ -15,6 +15,7 @@ from app.models.user import User
 from app.models.organization import Organization
 from app.models.membership import Membership, MembershipRole
 from app.api.dependencies import get_current_user
+from app.core.security import hash_password
 from decimal import Decimal
 
 from app.models.customer import Customer
@@ -72,7 +73,7 @@ def user(db):
     user = User(
         email="test@example.com",
         full_name="Test User",
-        password_hash=None,
+        password_hash=hash_password("TestPassword123!"),
         is_active=True,
     )
 
@@ -129,7 +130,7 @@ def staff_user(db, organization):
     user = User(
         email="staff@example.com",
         full_name="Staff User",
-        password_hash=None,
+        password_hash=hash_password("TestPassword123!"),
         is_active=True,
     )
 

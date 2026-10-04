@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_current_user
-from app.api.organization import get_user_membership, require_roles
+from app.api.organization import require_roles
 from app.core.database import get_db
 from app.models.membership import Membership, MembershipRole
 from app.models.user import User
@@ -17,61 +16,6 @@ router = APIRouter(
     tags=["Members"]
 )
 
-@router.post("/")
-def add_member(
-    organization_id: int,
-    data: AddMemberRequest,
-    membership: Membership = Depends(
-        require_roles(
-            MembershipRole.OWNER,
-            MembershipRole.ADMIN
-        )
-    ),
-    db: Session = Depends(get_db)
-):
-    user = db.query(User).filter(
-        User.id == data.user_id
-    ).first()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    existing_membership = db.query(Membership).filter(
-        Membership.user_id == data.user_id,
-        Membership.organization_id == organization_id
-    ).first()
-
-    if existing_membership:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is already a member of this organization"
-        )
-
-    if data.role == MembershipRole.OWNER:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Use the ownership transfer flow to assign ownership"
-        )
-
-    new_membership = Membership(
-        user_id=data.user_id,
-        organization_id=organization_id,
-        role=data.role
-    )
-
-    db.add(new_membership)
-    db.commit()
-    db.refresh(new_membership)
-
-    return {
-        "message": "Member added successfully",
-        "user_id": new_membership.user_id,
-        "organization_id": new_membership.organization_id,
-        "role": new_membership.role
-    }
 
 
 @router.post("/")

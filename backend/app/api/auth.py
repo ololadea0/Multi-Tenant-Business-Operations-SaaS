@@ -346,9 +346,12 @@ def reset_password(
 
     now = datetime.now(timezone.utc)
 
-    if reset_token.expires_at.replace(
-        tzinfo=timezone.utc
-    ) < now:
+    expires_at = reset_token.expires_at
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < now:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
@@ -417,9 +420,12 @@ def refresh(
             detail="Refresh token has been revoked"
         )
 
-    if stored_token.expires_at.replace(
-        tzinfo=timezone.utc
-    ) < now:
+    expires_at = stored_token.expires_at
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < now:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has expired"
