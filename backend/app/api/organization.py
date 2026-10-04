@@ -1,4 +1,7 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -6,12 +9,18 @@ from app.core.database import get_db
 from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.organization import OrganizationListItem, OrganizationResponse
 
 
 router = APIRouter(
     prefix="/api/organizations",
     tags=["Organizations"]
 )
+
+
+def slugify_organization_name(name: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return cleaned or "organization"
 
 
 def get_user_membership(
@@ -48,7 +57,7 @@ def require_roles(*allowed_roles: MembershipRole):
     return role_checker
 
 
-@router.get("/{organization_id}")
+@router.get("/{organization_id}", response_model=OrganizationResponse)
 def get_organization(
     organization_id: int,
     membership: Membership = Depends(get_user_membership),
@@ -64,71 +73,81 @@ def get_organization(
             detail="Organization not found"
         )
 
-    return {
-        "id": organization.id,
-        "name": organization.name,
-        "slug": organization.slug,
-        "role": membership.role
-    }
+    return OrganizationResponse(
+        id=organization.id,
+        name=organization.name,
+        slug=organization.slug,
+        role=membership.role
+    )
 
-@router.post("/")
+@router.post("/", response_model=OrganizationResponse)
 def create_organization(
     name: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    slug = f"{name.lower().replace(' ', '-').strip()}-{current_user.id}"
+    slug_base = slugify_organization_name(name)
+    slug = f"{slug_base}-{current_user.id}"
 
-    organization = Organization(
-        name=name,
-        slug=slug
-    )
+    try:
+        organization = Organization(
+            name=name,
+            slug=slug
+        )
 
-    db.add(organization)
-    db.flush()
+        db.add(organization)
+        db.flush()
 
-    membership = Membership(
-        user_id=current_user.id,
-        organization_id=organization.id,
-        role=MembershipRole.OWNER
-    )
+        membership = Membership(
+            user_id=current_user.id,
+            organization_id=organization.id,
+            role=MembershipRole.OWNER
+        )
 
-    db.add(membership)
-    db.commit()
-    db.refresh(organization)
+        db.add(membership)
+        db.commit()
+        db.refresh(organization)
 
-    return {
-        "id": organization.id,
-        "name": organization.name,
-        "slug": organization.slug,
-        "role": membership.role
-    }
+        return OrganizationResponse(
+            id=organization.id,
+            name=organization.name,
+            slug=organization.slug,
+            role=membership.role
+        )
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Organization could not be created. Please try a different name."
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create organization. Please try again."
+        )
 
-@router.get("/")
+@router.get("/", response_model=list[OrganizationListItem])
 def get_user_organizations(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    memberships = db.query(Membership).filter(
-        Membership.user_id == current_user.id
-    ).all()
+    organizations = (
+        db.query(Organization, Membership.role)
+        .join(Membership, Membership.organization_id == Organization.id)
+        .filter(Membership.user_id == current_user.id)
+        .all()
+    )
 
-    organizations = []
-
-    for membership in memberships:
-        organization = db.query(Organization).filter(
-            Organization.id == membership.organization_id
-        ).first()
-
-        if organization:
-            organizations.append({
-                "id": organization.id,
-                "name": organization.name,
-                "slug": organization.slug,
-                "role": membership.role
-            })
-
-    return organizations
+    return [
+        OrganizationListItem(
+            id=organization.id,
+            name=organization.name,
+            slug=organization.slug,
+            role=role
+        )
+        for organization, role in organizations
+    ]
 
 # @router.delete("/{organization_id}")
 # def delete_organization(
