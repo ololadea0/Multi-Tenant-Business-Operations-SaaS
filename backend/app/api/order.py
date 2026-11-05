@@ -1,6 +1,8 @@
+import secrets
+from datetime import datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -14,11 +16,12 @@ from app.models.customer import Customer
 from app.models.membership import Membership, MembershipRole
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.product import Product, ProductStatus
-from app.schemas.order import OrderCreate
+from app.schemas.order import OrderCreate, OrderResponse
 from app.models.inventory import (
     InventoryMovement,
     InventoryMovementType,
 )
+from app.services.activity import create_activity
 from app.services.inventory import change_stock
 
 
@@ -27,7 +30,15 @@ router = APIRouter(
     tags=["Orders"]
 )
 
-@router.post("/")
+
+def generate_order_number() -> str:
+    date_part = datetime.utcnow().strftime("%Y%m%d")
+    random_part = secrets.token_hex(3).upper()
+
+    return f"ORD-{date_part}-{random_part}"
+
+
+@router.post("/", response_model=OrderResponse)
 def create_order(
     organization_id: int,
     data: OrderCreate,
@@ -58,6 +69,7 @@ def create_order(
 
     try:
         order = Order(
+            order_number=generate_order_number(),
             organization_id=organization_id,
             customer_id=customer.id,
             created_by_user_id=membership.user_id,
@@ -122,12 +134,34 @@ def create_order(
 
         order.total_amount = total_amount
 
+        create_activity(
+            db=db,
+            organization_id=organization_id,
+            user_id=membership.user_id,
+            action="order.created",
+            entity_type="order",
+            entity_id=order.id,
+            description=f"Order '{order.order_number}' was created"
+        )
+
         db.commit()
         db.refresh(order)
 
+        order_items = db.query(OrderItem).filter(
+            OrderItem.order_id == order.id
+        ).all()
+
         return {
-            "message": "Order created successfully",
-            "order": order
+            "id": order.id,
+            "order_number": order.order_number,
+            "organization_id": order.organization_id,
+            "customer_id": order.customer_id,
+            "created_by_user_id": order.created_by_user_id,
+            "status": order.status,
+            "total_amount": order.total_amount,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+            "items": order_items
         }
 
     except HTTPException:
@@ -149,55 +183,54 @@ def create_order(
 @router.get("/")
 def get_orders(
     organization_id: int,
-    status_filter: OrderStatus | None = None,
-    search: str | None = None,
-    page: int = 1,
-    limit: int = 20,
+    search: str | None = Query(default=None, min_length=1),
+    customer_id: int | None = Query(default=None, ge=1),
+    order_status: OrderStatus | None = Query(default=None),
+    start_date: datetime | None = Query(default=None),
+    end_date: datetime | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
-    if page < 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Page must be greater than 0"
-        )
-
-    if limit < 1 or limit > 100:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Limit must be between 1 and 100"
-        )
-
-    query = db.query(Order).join(
-        Customer,
-        Order.customer_id == Customer.id
-    ).filter(
-        Order.organization_id == organization_id,
-        Customer.organization_id == organization_id
+    query = db.query(Order).filter(
+        Order.organization_id == organization_id
     )
 
-    if status_filter:
+    if search:
         query = query.filter(
-            Order.status == status_filter
+            Order.order_number.ilike(
+                f"%{search.strip()}%"
+            )
         )
 
-    if search:
-        search_term = f"%{search.strip()}%"
-
+    if customer_id:
         query = query.filter(
-            Customer.name.ilike(search_term)
-            | Customer.email.ilike(search_term)
-            | Customer.phone.ilike(search_term)
+            Order.customer_id == customer_id
+        )
+
+    if order_status:
+        query = query.filter(
+            Order.status == order_status
+        )
+
+    if start_date:
+        query = query.filter(
+            Order.created_at >= start_date
+        )
+
+    if end_date:
+        query = query.filter(
+            Order.created_at <= end_date
         )
 
     total = query.count()
 
-    offset = (page - 1) * limit
-
     orders = query.order_by(
-        Order.created_at.desc()
+        Order.created_at.desc(),
+        Order.id.desc()
     ).offset(
-        offset
+        (page - 1) * limit
     ).limit(
         limit
     ).all()
@@ -207,10 +240,10 @@ def get_orders(
         "page": page,
         "limit": limit,
         "total": total,
-        "total_pages": (total + limit - 1) // limit
+        "pages": (total + limit - 1) // limit
     }
 
-@router.get("/{order_id}")
+@router.get("/{order_id}", response_model=OrderResponse)
 def get_order(
     organization_id: int,
     order_id: int,
@@ -234,6 +267,7 @@ def get_order(
 
     return {
         "id": order.id,
+        "order_number": order.order_number,
         "customer_id": order.customer_id,
         "created_by_user_id": order.created_by_user_id,
         "status": order.status,

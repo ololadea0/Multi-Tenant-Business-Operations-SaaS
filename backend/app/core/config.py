@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    COOKIE_SECURE: bool = False
+    CORS_ALLOW_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
+    AUTH_REGISTER_RATE_LIMIT: int = 20
+    AUTH_LOGIN_RATE_LIMIT: int = 10
+    AUTH_PASSWORD_RESET_RATE_LIMIT: int = 10
+    AUTH_LOGOUT_RATE_LIMIT: int = 20
 
     RESEND_API_KEY: str
     EMAIL_FROM: str

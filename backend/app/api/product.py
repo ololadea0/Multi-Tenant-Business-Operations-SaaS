@@ -10,6 +10,7 @@ from app.models.inventory import InventoryMovement, InventoryMovementType
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product, ProductStatus
 from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
+from app.services.activity import create_activity
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,16 @@ def create_product(
         )
 
         db.add(movement)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="product.created",
+        entity_type="product",
+        entity_id=product.id,
+        description=f"Product '{product.name}' was created"
+    )
 
     try:
         db.commit()
@@ -228,6 +239,16 @@ def update_product(
     for field, value in update_data.items():
         setattr(product, field, value)
 
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="product.updated",
+        entity_type="product",
+        entity_id=product.id,
+        description=f"Product '{product.name}' was updated"
+    )
+
     try:
         db.commit()
         db.refresh(product)
@@ -286,6 +307,16 @@ def update_product_status(
 
     product.status = product_status
 
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="product.status_changed",
+        entity_type="product",
+        entity_id=product.id,
+        description=f"Product '{product.name}' status changed to {product.status.value}"
+    )
+
     try:
         db.commit()
         db.refresh(product)
@@ -332,8 +363,22 @@ def delete_product(
             detail="Product not found."
         )
 
+    product_name = product.name
+    product_id = product.id
+
+    db.delete(product)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="product.deleted",
+        entity_type="product",
+        entity_id=product_id,
+        description=f"Product '{product_name}' was deleted"
+    )
+
     try:
-        db.delete(product)
         db.commit()
     except IntegrityError:
         db.rollback()

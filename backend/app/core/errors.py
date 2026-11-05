@@ -1,11 +1,42 @@
 import logging
 
-from fastapi import Request
+from fastapi import HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 
 logger = logging.getLogger(__name__)
+
+
+async def http_exception_handler(
+    request: Request,
+    exc: HTTPException,
+):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+
+
+async def request_validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Validation failed",
+            "errors": [
+                {
+                    "loc": list(error.get("loc", [])),
+                    "msg": error.get("msg"),
+                    "type": error.get("type"),
+                }
+                for error in exc.errors()
+            ],
+        },
+    )
 
 
 async def integrity_error_handler(

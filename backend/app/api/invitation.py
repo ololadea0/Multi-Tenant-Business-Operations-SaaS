@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,9 +13,12 @@ from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.invitation import CreateInvitationRequest, AcceptInvitationRequest, RegisterWithInvitationRequest
+from app.services.activity import create_activity
 from app.services.email import send_organization_invitation_email
 from app.api.dependencies import get_current_user
 from app.models.refresh_token import RefreshToken
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -98,6 +102,17 @@ def create_invitation(
     )
 
     db.add(invitation)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="invitation.created",
+        entity_type="invitation",
+        entity_id=invitation.id,
+        description=f"Invitation for '{email}' was created for the {data.role.value} role"
+    )
+
     db.commit()
     db.refresh(invitation)
 
@@ -110,13 +125,20 @@ def create_invitation(
         f"?token={raw_token}"
     )
 
-    send_organization_invitation_email(
-        recipient=email,
-        organization_name=organization.name,
-        inviter_name=inviter.full_name,
-        role=data.role.value,
-        invitation_url=invitation_url
-    )
+    try:
+        send_organization_invitation_email(
+            recipient=email,
+            organization_name=organization.name,
+            inviter_name=inviter.full_name,
+            role=data.role.value,
+            invitation_url=invitation_url
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send organization invitation email for organization_id=%s email=%s",
+            organization_id,
+            email,
+        )
 
     return {
         "message": "Invitation sent successfully",
@@ -179,6 +201,16 @@ def accept_invitation(
     )
 
     db.add(membership)
+
+    create_activity(
+        db=db,
+        organization_id=invitation.organization_id,
+        user_id=current_user.id,
+        action="invitation.accepted",
+        entity_type="invitation",
+        entity_id=invitation.id,
+        description=f"Invitation for '{current_user.email}' was accepted"
+    )
 
     invitation.accepted_at = datetime.utcnow()
 
@@ -251,6 +283,16 @@ def register_with_invitation(
     )
 
     db.add(membership)
+
+    create_activity(
+        db=db,
+        organization_id=invitation.organization_id,
+        user_id=user.id,
+        action="invitation.accepted",
+        entity_type="invitation",
+        entity_id=invitation.id,
+        description=f"Invitation for '{user.email}' was accepted during signup"
+    )
 
     invitation.accepted_at = datetime.utcnow()
 

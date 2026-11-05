@@ -11,6 +11,7 @@ from app.models.inventory import (
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product, ProductStatus
 from app.schemas.inventory import InventoryMovementCreate
+from app.services.activity import create_activity
 from app.services.inventory import change_stock
 
 
@@ -137,6 +138,19 @@ def create_inventory_movement(
         quantity=data.quantity,
         user_id=membership.user_id,
         note=data.note
+    )
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action=f"inventory.{data.movement_type.value}",
+        entity_type="product",
+        entity_id=product.id,
+        description=(
+            f"Inventory {data.movement_type.value} of {data.quantity} units "
+            f"for product '{product.name}'"
+        )
     )
 
     try:

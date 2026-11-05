@@ -41,6 +41,8 @@ class OrderItemResponse(BaseModel):
 
 class OrderResponse(BaseModel):
     id: int
+    order_number: str
+    organization_id: int
     customer_id: int
     created_by_user_id: int | None
     status: str

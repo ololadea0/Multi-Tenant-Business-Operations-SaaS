@@ -31,10 +31,13 @@ def test_create_order(
 
     assert response.status_code == 200
 
-    data = response.json()["order"]
+    data = response.json()
 
     assert data["customer_id"] == customer.id
     assert data["status"] == OrderStatus.CONFIRMED
+    assert data["order_number"].startswith("ORD-")
+    assert data["order_number"][4:12].isdigit()
+    assert len(data["order_number"].split("-")[-1]) == 6
     assert Decimal(str(data["total_amount"])) == Decimal("500000.00")
 
     db.refresh(product)
@@ -153,7 +156,7 @@ def test_cancel_order_restores_stock(
 
     assert create_response.status_code == 200
 
-    order_id = create_response.json()["order"]["id"]
+    order_id = create_response.json()["id"]
 
     db.refresh(product)
     assert product.stock_quantity == 7
@@ -204,7 +207,7 @@ def test_cannot_cancel_order_twice(
         },
     )
 
-    order_id = create_response.json()["order"]["id"]
+    order_id = create_response.json()["id"]
 
     first_cancel = authenticated_client.post(
         f"/api/organizations/{organization.id}/orders/{order_id}/cancel"
@@ -238,7 +241,7 @@ def test_completed_order_cannot_be_cancelled(
         },
     )
 
-    order_id = create_response.json()["order"]["id"]
+    order_id = create_response.json()["id"]
 
     complete_response = authenticated_client.post(
         f"/api/organizations/{organization.id}/orders/{order_id}/complete"

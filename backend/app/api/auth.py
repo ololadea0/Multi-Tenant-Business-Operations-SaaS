@@ -1,21 +1,36 @@
+import hashlib
+import re
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie, Request
 from sqlalchemy.orm import Session
-import hashlib
-
-from app.core.database import get_db
-from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, hash_refresh_token, create_password_reset_token
-from datetime import datetime, timedelta, timezone
-from app.core.config import settings
-
-from app.models.user import User
-from app.models.organization import Organization
-from app.models.membership import Membership, MembershipRole
-from app.schemas.auth import RegisterRequest, LoginRequest, ForgotPasswordRequest, ResetPasswordRequest
-from app.api.dependencies import get_current_user
-from app.models.refresh_token import RefreshToken
-from app.models.password_reset_token import PasswordResetToken
-from app.services.email import send_password_reset_email
 from authlib.integrations.starlette_client import OAuth
+
+from app.api.dependencies import get_current_user
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.rate_limit import rate_limit
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    create_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    verify_password,
+)
+
+from app.models.membership import Membership, MembershipRole
+from app.models.organization import Organization
+from app.models.password_reset_token import PasswordResetToken
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+)
+from app.services.email import send_password_reset_email
 
 oauth = OAuth()
 
@@ -35,6 +50,39 @@ router = APIRouter(
     prefix="/api/auth",
     tags=["Authentication"]
 )
+
+
+def validate_password_strength(password: str) -> None:
+    if (
+        len(password) < 8
+        or len(password) > 72
+        or not re.search(r"[A-Z]", password)
+        or not re.search(r"[a-z]", password)
+        or not re.search(r"\d", password)
+        or not re.search(r"[^\w\s]", password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Password must be at least 8 characters long and include an uppercase letter, "
+                "a lowercase letter, a number, and a special character."
+            )
+        )
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def normalize_name(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Full name cannot be blank.",
+        )
+    return normalized
+
 
 @router.get("/google")
 async def google_login(request: Request):
@@ -152,9 +200,10 @@ async def google_callback(
         key="refresh_token",
         value=raw_refresh_token,
         httponly=True,
-        secure=False,
+        secure=settings.COOKIE_SECURE,
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
     )
 
     return {
@@ -162,13 +211,23 @@ async def google_callback(
         "token_type": "bearer"
     }
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(rate_limit("register", limit=settings.AUTH_REGISTER_RATE_LIMIT, window_seconds=60))
+    ],
+)
 def register(
     data: RegisterRequest,
     db: Session = Depends(get_db)
 ):
+    normalized_email = normalize_email(data.email)
+    normalized_name = normalize_name(data.full_name)
+    validate_password_strength(data.password)
+
     existing_user = db.query(User).filter(
-        User.email == data.email
+        User.email == normalized_email
     ).first()
 
     if existing_user:
@@ -178,9 +237,9 @@ def register(
         )
 
     user = User(
-        email=data.email,
+        email=normalized_email,
         password_hash=hash_password(data.password),
-        full_name=data.full_name
+        full_name=normalized_name,
     )
 
     db.add(user)
@@ -219,14 +278,19 @@ def register(
         }
     }
 
-@router.post("/login")
+@router.post(
+    "/login",
+    dependencies=[Depends(rate_limit("login", limit=settings.AUTH_LOGIN_RATE_LIMIT, window_seconds=60))],
+)
 def login(
     data: LoginRequest,
     response: Response,
     db: Session = Depends(get_db)
 ):
+    normalized_email = normalize_email(data.email)
+
     user = db.query(User).filter(
-        User.email == data.email
+        User.email == normalized_email
     ).first()
 
     if not user or not user.password_hash:
@@ -260,9 +324,10 @@ def login(
         key="refresh_token",
         value=raw_refresh_token,
         httponly=True,
-        secure=False,  # True in production with HTTPS
+        secure=settings.COOKIE_SECURE,
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
     )
 
     refresh_token = RefreshToken(
@@ -279,13 +344,18 @@ def login(
         "token_type": "bearer"
     }
 
-@router.post("/forgot-password")
+@router.post(
+    "/forgot-password",
+    dependencies=[Depends(rate_limit("forgot-password", limit=settings.AUTH_PASSWORD_RESET_RATE_LIMIT, window_seconds=60))],
+)
 def forgot_password(
     data: ForgotPasswordRequest,
     db: Session = Depends(get_db)
 ):
+    normalized_email = normalize_email(data.email)
+
     user = db.query(User).filter(
-        User.email == data.email
+        User.email == normalized_email
     ).first()
 
     if user:
@@ -319,11 +389,16 @@ def forgot_password(
         "a password reset link has been sent."
     }
 
-@router.post("/reset-password")
+@router.post(
+    "/reset-password",
+    dependencies=[Depends(rate_limit("reset-password", limit=settings.AUTH_PASSWORD_RESET_RATE_LIMIT, window_seconds=60))],
+)
 def reset_password(
     data: ResetPasswordRequest,
     db: Session = Depends(get_db)
 ):
+    validate_password_strength(data.new_password)
+
     token_hash = hashlib.sha256(
         data.token.encode("utf-8")
     ).hexdigest()
@@ -368,6 +443,11 @@ def reset_password(
         )
 
     user.password_hash = hash_password(data.new_password)
+
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked_at.is_(None),
+    ).update({RefreshToken.revoked_at: now})
 
     reset_token.used_at = now
 
@@ -453,9 +533,10 @@ def refresh(
         key="refresh_token",
         value=new_raw_token,
         httponly=True,
-        secure=False,
+        secure=settings.COOKIE_SECURE,
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
     )
 
     new_refresh_token = RefreshToken(
@@ -472,7 +553,10 @@ def refresh(
         "token_type": "bearer"
 }
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    dependencies=[Depends(rate_limit("logout", limit=settings.AUTH_LOGOUT_RATE_LIMIT, window_seconds=60))],
+)
 def logout(
     response: Response,
     refresh_token: str | None = Cookie(default=None),
@@ -490,7 +574,8 @@ def logout(
             db.commit()
 
     response.delete_cookie(
-        key="refresh_token"
+        key="refresh_token",
+        path="/",
     )
 
     return {

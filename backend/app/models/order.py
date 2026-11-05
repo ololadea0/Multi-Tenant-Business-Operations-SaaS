@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -8,6 +9,7 @@ from sqlalchemy import (
     Enum as SQLEnum,
     ForeignKey,
     Numeric,
+    String,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +21,12 @@ class OrderStatus(str, Enum):
     CONFIRMED = "confirmed"
     CANCELLED = "cancelled"
     COMPLETED = "completed"
+
+
+def generate_order_number() -> str:
+    date_part = datetime.utcnow().strftime("%Y%m%d")
+    random_part = secrets.token_hex(3).upper()
+    return f"ORD-{date_part}-{random_part}"
 
 
 class Order(Base):
@@ -33,6 +41,14 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(
         primary_key=True
+    )
+
+    order_number: Mapped[str] = mapped_column(
+        String(50),
+        default=generate_order_number,
+        nullable=False,
+        unique=True,
+        index=True
     )
 
     organization_id: Mapped[int] = mapped_column(

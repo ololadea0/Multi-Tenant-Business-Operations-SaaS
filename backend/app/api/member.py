@@ -9,6 +9,7 @@ from app.schemas.member import (
     AddMemberRequest,
     UpdateMemberRoleRequest,
 )
+from app.services.activity import create_activity
 
 
 router = APIRouter(
@@ -87,6 +88,17 @@ def add_member(
     )
 
     db.add(new_membership)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.added",
+        entity_type="member",
+        entity_id=new_membership.user_id,
+        description=f"Member '{user.email}' was added to the organization"
+    )
+
     db.commit()
     db.refresh(new_membership)
 
@@ -137,6 +149,19 @@ def update_member_role(
 
     target_membership.role = data.role
 
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.role_updated",
+        entity_type="member",
+        entity_id=target_membership.user_id,
+        description=(
+            f"Member '{target_membership.user.email}' role was changed "
+            f"to {data.role.value}"
+        )
+    )
+
     db.commit()
     db.refresh(target_membership)
 
@@ -174,6 +199,16 @@ def remove_member(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The organization owner cannot be removed"
         )
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.removed",
+        entity_type="member",
+        entity_id=target_membership.user_id,
+        description=f"Member '{target_membership.user.email}' was removed from the organization"
+    )
 
     db.delete(target_membership)
     db.commit()

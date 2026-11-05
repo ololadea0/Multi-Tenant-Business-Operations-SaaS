@@ -11,6 +11,7 @@ from app.schemas.customer import (
     CustomerCreate,
     CustomerUpdate,
 )
+from app.services.activity import create_activity
 
 
 router = APIRouter(
@@ -44,6 +45,17 @@ def create_customer(
     )
 
     db.add(customer)
+    db.flush()
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="customer.created",
+        entity_type="customer",
+        entity_id=customer.id,
+        description=f"Customer '{customer.name}' was created"
+    )
 
     try:
         db.commit()
@@ -204,6 +216,16 @@ def update_customer(
     for field, value in update_data.items():
         setattr(customer, field, value)
 
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="customer.updated",
+        entity_type="customer",
+        entity_id=customer.id,
+        description=f"Customer '{customer.name}' was updated"
+    )
+
     try:
         db.commit()
         db.refresh(customer)
@@ -249,8 +271,22 @@ def delete_customer(
             detail="Customer not found"
         )
 
+    customer_name = customer.name
+    customer_id = customer.id
+
+    db.delete(customer)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="customer.deleted",
+        entity_type="customer",
+        entity_id=customer_id,
+        description=f"Customer '{customer_name}' was deleted"
+    )
+
     try:
-        db.delete(customer)
         db.commit()
     except IntegrityError:
         db.rollback()

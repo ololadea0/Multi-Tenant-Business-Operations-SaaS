@@ -11,6 +11,16 @@ from app.models.password_reset_token import PasswordResetToken
 from app.core.security import create_password_reset_token, hash_password
 from app.core.security import verify_password
 
+def test_root_has_cors_headers(client):
+    response = client.get(
+        "/",
+        headers={"Origin": "http://localhost:5173"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
 def test_register_user(client, db):
     response = client.post(
         "/api/auth/register",
@@ -59,6 +69,68 @@ def test_register_duplicate_email(client, user):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Email is already registered"
+
+
+def test_register_validation_error_has_consistent_shape(client):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "missing-full-name@example.com",
+            "password": "StrongPassword123!",
+        },
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert data["detail"] == "Validation failed"
+    assert "errors" in data
+    assert any(error["loc"] == ["body", "full_name"] for error in data["errors"])
+
+
+def test_register_normalizes_user_input_and_rejects_blank_name(client):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "  NewUser@Example.com   ",
+            "password": "StrongPassword123!",
+            "full_name": "   ",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Full name cannot be blank."
+
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "  NewUser@Example.com   ",
+            "password": "StrongPassword123!",
+            "full_name": "  Jane Doe  ",
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["user"]["email"] == "newuser@example.com"
+    assert data["user"]["full_name"] == "Jane Doe"
+
+
+def test_register_rejects_weak_password(client):
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "weakpass@example.com",
+            "password": "weak",
+            "full_name": "Weak Password",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Password must be at least 8 characters long and include an uppercase letter, "
+        "a lowercase letter, a number, and a special character."
+    )
+
 
 def test_login_success(client, user):
     response = client.post(
@@ -373,6 +445,33 @@ def test_reset_password_invalid_token(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid or expired reset token"
+
+
+def test_reset_password_rejects_weak_password(client, user, db):
+    raw_token, token_hash = create_password_reset_token()
+
+    reset_token = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
+
+    db.add(reset_token)
+    db.commit()
+
+    response = client.post(
+        "/api/auth/reset-password",
+        json={
+            "token": raw_token,
+            "new_password": "weak",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Password must be at least 8 characters long and include an uppercase letter, "
+        "a lowercase letter, a number, and a special character."
+    )
 
 
 def test_reset_password_used_token(client, user, db):
