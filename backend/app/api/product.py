@@ -11,6 +11,7 @@ from app.models.membership import Membership, MembershipRole
 from app.models.product import Product, ProductStatus
 from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
 from app.services.activity import create_activity
+from app.services.billing import enforce_limit
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ def create_product(
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
+    enforce_limit(db, organization_id, "products")
     if membership.role not in {
         MembershipRole.OWNER,
         MembershipRole.ADMIN,
@@ -53,6 +55,7 @@ def create_product(
         name=data.name,
         sku=data.sku,
         description=data.description,
+        cost_price=data.cost_price,
         unit_price=data.unit_price,
         stock_quantity=data.stock_quantity,
         low_stock_threshold=data.low_stock_threshold

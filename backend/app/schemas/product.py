@@ -19,6 +19,11 @@ class ProductCreate(BaseModel):
 
     description: str | None = None
 
+    cost_price: Decimal = Field(
+        default=0,
+        ge=0
+    )
+
     unit_price: Decimal = Field(
         ge=0
     )
@@ -50,6 +55,11 @@ class ProductUpdate(BaseModel):
 
     description: str | None = None
 
+    cost_price: Decimal | None = Field(
+        default=None,
+        ge=0
+    )
+
     unit_price: Decimal | None = Field(
         default=None,
         ge=0
@@ -71,6 +81,7 @@ class ProductResponse(BaseModel):
     name: str
     sku: str
     description: str | None
+    cost_price: Decimal
     unit_price: Decimal
     stock_quantity: int
     low_stock_threshold: int

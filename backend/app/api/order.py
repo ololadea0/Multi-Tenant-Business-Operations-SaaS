@@ -23,6 +23,7 @@ from app.models.inventory import (
 )
 from app.services.activity import create_activity
 from app.services.inventory import change_stock
+from app.services.billing import enforce_limit
 
 
 router = APIRouter(
@@ -45,6 +46,7 @@ def create_order(
     membership: Membership = Depends(get_user_membership),
     db: Session = Depends(get_db)
 ):
+    enforce_limit(db, organization_id, "monthly_orders")
     if membership.role not in {
         MembershipRole.OWNER,
         MembershipRole.ADMIN,
@@ -235,8 +237,36 @@ def get_orders(
         limit
     ).all()
 
+    serialized_orders = []
+    for order in orders:
+        order_items = db.query(OrderItem).filter(
+            OrderItem.order_id == order.id
+        ).all()
+
+        serialized_orders.append({
+            "id": order.id,
+            "order_number": order.order_number,
+            "organization_id": order.organization_id,
+            "customer_id": order.customer_id,
+            "created_by_user_id": order.created_by_user_id,
+            "status": order.status,
+            "total_amount": order.total_amount,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+            "items": [
+                {
+                    "id": item.id,
+                    "product_id": item.product_id,
+                    "quantity": item.quantity,
+                    "unit_price": item.unit_price,
+                    "subtotal": item.subtotal,
+                }
+                for item in order_items
+            ],
+        })
+
     return {
-        "items": orders,
+        "items": serialized_orders,
         "page": page,
         "limit": limit,
         "total": total,

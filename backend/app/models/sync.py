@@ -71,9 +71,8 @@ class SyncQueueItem(Base):
 
     operation_id: Mapped[str] = mapped_column(
         String(255),
-        unique=True,
         nullable=False,
-        index=True
+        index=False
     )
 
     entity_type: Mapped[str] = mapped_column(
@@ -124,3 +123,4 @@ class SyncQueueItem(Base):
         onupdate=datetime.utcnow,
         nullable=False
     )
+    __table_args__ = (UniqueConstraint("operation_id"),)

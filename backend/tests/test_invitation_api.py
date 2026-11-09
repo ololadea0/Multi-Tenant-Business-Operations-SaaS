@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from app.api.dependencies import get_current_user
+from app.core.security import hash_invitation_token, hash_password
+from app.main import app
 from app.models.invitation import OrganizationInvitation
 from app.models.membership import Membership, MembershipRole
+from app.models.user import User
 
 
 def test_create_invitation(
@@ -176,6 +180,49 @@ def test_resend_invitation(
     db.refresh(invitation)
 
     assert invitation.expires_at > old_expiry
+
+
+def test_accept_invitation_handles_naive_expiry_datetime(
+    authenticated_client,
+    organization,
+    db,
+    user,
+):
+    invited_user = User(
+        email="invited-user@example.com",
+        full_name="Invited User",
+        password_hash=hash_password("TestPassword123!"),
+        is_active=True,
+    )
+    db.add(invited_user)
+    db.commit()
+    db.refresh(invited_user)
+
+    app.dependency_overrides[get_current_user] = lambda: invited_user
+
+    token = "invite-token-to-accept"
+    invitation = OrganizationInvitation(
+        organization_id=organization.id,
+        invited_by_user_id=user.id,
+        email=invited_user.email,
+        role=MembershipRole.STAFF,
+        token_hash=hash_invitation_token(token),
+        expires_at=datetime.utcnow() + timedelta(days=1),
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+
+    response = authenticated_client.post(
+        "/api/invitations/accept",
+        json={"token": token},
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Invitation accepted successfully"
+    assert response.json()["organization_id"] == organization.id
 
 
 def test_staff_cannot_create_invitation(

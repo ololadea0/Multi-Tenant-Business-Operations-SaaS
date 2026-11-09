@@ -46,6 +46,10 @@ class User(Base):
         nullable=False
     )
 
+    is_email_verified: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -57,4 +61,8 @@ class User(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
         nullable=False
+    )
+
+    is_email_verified: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true", nullable=False
     )

@@ -10,6 +10,7 @@ from app.models.inventory import (
 )
 from app.models.membership import Membership, MembershipRole
 from app.models.product import Product, ProductStatus
+from app.models.user import User
 from app.schemas.inventory import InventoryMovementCreate
 from app.services.activity import create_activity
 from app.services.inventory import change_stock
@@ -137,7 +138,8 @@ def create_inventory_movement(
         movement_type=data.movement_type,
         quantity=data.quantity,
         user_id=membership.user_id,
-        note=data.note
+        note=data.note,
+        reason=data.reason.value if data.reason else None
     )
 
     create_activity(
@@ -218,3 +220,29 @@ def get_inventory_movements(
         "total": total,
         "pages": (total + limit - 1) // limit
     }
+
+
+@summary_router.get("/movements")
+def get_organization_inventory_movements(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db)
+):
+    movements = db.query(InventoryMovement).filter(
+        InventoryMovement.organization_id == organization_id
+    ).order_by(InventoryMovement.created_at.desc(), InventoryMovement.id.desc()).limit(100).all()
+    return [{
+        "id": movement.id,
+        "organization_id": movement.organization_id,
+        "product_id": movement.product_id,
+        "product_name": db.query(Product.name).filter(Product.id == movement.product_id).scalar(),
+        "user_id": movement.user_id,
+        "recorded_by": db.query(User.full_name).filter(User.id == movement.user_id).scalar() if movement.user_id else None,
+        "movement_type": movement.movement_type,
+        "quantity": movement.quantity,
+        "previous_stock": movement.previous_stock,
+        "new_stock": movement.new_stock,
+        "reason": movement.reason,
+        "note": movement.note,
+        "created_at": movement.created_at,
+    } for movement in movements]

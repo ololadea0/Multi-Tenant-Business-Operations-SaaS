@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.organization import get_user_membership
 from app.core.database import get_db
@@ -28,17 +29,24 @@ def get_activities(
     if action:
         query = query.filter(Activity.action == action)
 
-    total = query.count()
-
-    activities = query.order_by(
-        Activity.created_at.desc(),
-        Activity.id.desc()
-    ).offset(
-        (page - 1) * limit
-    ).limit(limit).all()
+    try:
+        total = query.count()
+        activities = query.order_by(Activity.created_at.desc(), Activity.id.desc()).offset((page - 1) * limit).limit(limit).all()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Activity history is temporarily unavailable. Please try again.")
 
     return {
-        "items": activities,
+        "items": [{
+            "id": item.id,
+            "organization_id": item.organization_id,
+            "user_id": item.user_id,
+            "action": item.action,
+            "entity_type": item.entity_type,
+            "entity_id": item.entity_id,
+            "description": item.description,
+            "created_at": item.created_at,
+        } for item in activities],
         "page": page,
         "limit": limit,
         "total": total,

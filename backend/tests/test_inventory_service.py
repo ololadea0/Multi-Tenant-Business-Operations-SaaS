@@ -57,6 +57,7 @@ def test_stock_out():
         movement_type=InventoryMovementType.OUT,
         quantity=4,
         user_id=1,
+        reason="sale",
     )
 
     assert product.stock_quantity == 6
@@ -76,11 +77,50 @@ def test_stock_out_rejects_insufficient_stock():
             movement_type=InventoryMovementType.OUT,
             quantity=5,
             user_id=1,
+            reason="sale",
         )
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "Insufficient stock"
     assert product.stock_quantity == 3
+
+
+def test_stock_out_requires_valid_reason():
+    db = FakeDB()
+    product = make_product(stock_quantity=10)
+
+    with pytest.raises(HTTPException) as exc:
+        change_stock(
+            db=db,
+            organization_id=1,
+            product=product,
+            movement_type=InventoryMovementType.OUT,
+            quantity=2,
+            user_id=1,
+            reason=None,
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Stock-out movements require a valid reason."
+    assert product.stock_quantity == 10
+
+
+def test_stock_out_accepts_non_sale_reason():
+    db = FakeDB()
+    product = make_product(stock_quantity=10)
+
+    movement = change_stock(
+        db=db,
+        organization_id=1,
+        product=product,
+        movement_type=InventoryMovementType.OUT,
+        quantity=2,
+        user_id=1,
+        reason="damage",
+    )
+
+    assert product.stock_quantity == 8
+    assert movement.reason == "damage"
 
 
 def test_adjustment_can_increase_stock():

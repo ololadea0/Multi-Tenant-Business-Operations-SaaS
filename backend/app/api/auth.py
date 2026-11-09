@@ -1,8 +1,11 @@
 import hashlib
+import logging
+import secrets
 import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie, Request
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from authlib.integrations.starlette_client import OAuth
 
@@ -24,15 +27,20 @@ from app.models.organization import Organization
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
+from app.models.email_verification_token import EmailVerificationToken
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    VerifyEmailRequest,
+    ProfileUpdateRequest,
 )
-from app.services.email import send_password_reset_email
+from app.services.email import send_password_reset_email, send_verification_email
+from app.services.billing import get_or_create_trial
 
 oauth = OAuth()
+logger = logging.getLogger(__name__)
 
 oauth.register(
     name="google",
@@ -84,6 +92,22 @@ def normalize_name(value: str) -> str:
     return normalized
 
 
+def issue_verification_token(db: Session, user: User) -> str:
+    now = datetime.utcnow()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now})
+    raw = secrets.token_urlsafe(32)
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        expires_at=now + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES),
+    ))
+    db.commit()
+    return raw
+
+
 @router.get("/google")
 async def google_login(request: Request):
     redirect_uri = settings.GOOGLE_REDIRECT_URI
@@ -99,9 +123,14 @@ async def google_callback(
     response: Response,
     db: Session = Depends(get_db)
 ):
-    token = await oauth.google.authorize_access_token(request)
-
-    user_info = token.get("userinfo")
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get("userinfo")
+        if not user_info and token.get("id_token"):
+            user_info = await oauth.google.parse_id_token(request, token)
+    except Exception:
+        logger.exception("Google OAuth callback token exchange failed")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google sign-in could not be completed. Please try again.")
 
     if not user_info:
         raise HTTPException(
@@ -141,7 +170,8 @@ async def google_callback(
             email=email,
             full_name=full_name or email.split("@")[0],
             google_id=google_id,
-            avatar_url=avatar_url
+            avatar_url=avatar_url,
+            is_email_verified=True,
         )
 
         db.add(user)
@@ -164,10 +194,13 @@ async def google_callback(
         db.add(membership)
         db.commit()
         db.refresh(user)
+        get_or_create_trial(db, organization.id)
 
     else:
         if not user.google_id:
             user.google_id = google_id
+
+        user.is_email_verified = True
 
         if avatar_url:
             user.avatar_url = avatar_url
@@ -206,10 +239,8 @@ async def google_callback(
         path="/",
     )
 
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
+    redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/login#access_token={access_token}"
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 
 @router.post(
     "/register",
@@ -240,13 +271,14 @@ def register(
         email=normalized_email,
         password_hash=hash_password(data.password),
         full_name=normalized_name,
+        is_email_verified=False,
     )
 
     db.add(user)
     db.flush()
 
     organization = Organization(
-        name=f"{data.full_name}'s Organization",
+        name=data.business_name or f"{data.full_name}'s Organization",
         slug=f"user-{user.id}"
     )
 
@@ -263,6 +295,9 @@ def register(
     db.commit()
 
     db.refresh(user)
+    get_or_create_trial(db, organization.id)
+    token = issue_verification_token(db, user)
+    send_verification_email(user.email, user.full_name, token)
 
     return {
         "message": "Registration successful",
@@ -313,6 +348,9 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
+
+    if not user.is_email_verified:
+        raise HTTPException(status_code=403, detail={"code": "email_verification_required", "email": user.email, "message": "Please verify your email address first."})
 
     access_token = create_access_token(user.id)
 
@@ -581,3 +619,37 @@ def logout(
     return {
         "message": "Logout successful"
     }
+
+
+@router.patch("/me")
+def update_me(data: ProfileUpdateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current_user.full_name = normalize_name(data.full_name)
+    db.commit()
+    db.refresh(current_user)
+    return {"id": current_user.id, "email": current_user.email, "full_name": current_user.full_name, "avatar_url": current_user.avatar_url, "is_active": current_user.is_active}
+
+
+@router.post("/verify-email")
+def verify_email(data: VerifyEmailRequest, db: Session = Depends(get_db)):
+    token = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == hashlib.sha256(data.token.encode()).hexdigest()
+    ).first()
+    now = datetime.utcnow()
+    if not token or token.used_at is not None or token.expires_at < now:
+        raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+    user = db.query(User).filter(User.id == token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+    token.used_at = now
+    user.is_email_verified = True
+    db.commit()
+    return {"message": "Email verified successfully."}
+
+
+@router.post("/resend-verification", dependencies=[Depends(rate_limit("resend-verification", limit=settings.AUTH_RESEND_VERIFICATION_RATE_LIMIT, window_seconds=60))])
+def resend_verification(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == normalize_email(data.email)).first()
+    if user and not user.is_email_verified:
+        token = issue_verification_token(db, user)
+        send_verification_email(user.email, user.full_name, token)
+    return {"message": "If an unverified account exists, a verification email has been sent."}

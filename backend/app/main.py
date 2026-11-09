@@ -26,7 +26,7 @@ from app.core.database import engine
 from app.api.auth import router as auth_router
 from app.api.organization import router as organization_router
 from app.api.member import router as member_router
-from app.api.invitation import router as invitation_router
+from app.api.invitation import router as invitation_router, public_router as public_invitation_router
 from app.api.product import router as product_router
 from app.api.inventory import router as inventory_router, summary_router
 from app.api.customer import router as customer_router
@@ -34,6 +34,7 @@ from app.api.order import router as order_router
 from app.api.activity import router as activity_router
 from app.api.dashboard import router as dashboard_router
 from app.api.sync import router as sync_router
+from app.api.billing import router as billing_router
 
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
@@ -91,6 +92,7 @@ app.include_router(auth_router)
 app.include_router(organization_router)
 app.include_router(member_router)
 app.include_router(invitation_router)
+app.include_router(public_invitation_router)
 app.include_router(product_router)
 app.include_router(inventory_router)
 app.include_router(summary_router)
@@ -99,6 +101,7 @@ app.include_router(order_router)
 app.include_router(activity_router)
 app.include_router(dashboard_router)
 app.include_router(sync_router)
+app.include_router(billing_router)
 
 @app.get("/")
 def root():

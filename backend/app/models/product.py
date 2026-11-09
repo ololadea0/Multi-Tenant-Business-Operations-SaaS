@@ -26,6 +26,10 @@ class Product(Base):
 
     __table_args__ = (
         CheckConstraint(
+            "cost_price >= 0",
+            name="ck_product_cost_price_non_negative"
+        ),
+        CheckConstraint(
             "unit_price >= 0",
             name="ck_product_unit_price_non_negative"
         ),
@@ -63,6 +67,12 @@ class Product(Base):
     description: Mapped[str | None] = mapped_column(
         Text,
         nullable=True
+    )
+
+    cost_price: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        default=0,
+        nullable=False
     )
 
     unit_price: Mapped[Decimal] = mapped_column(

@@ -258,3 +258,33 @@ def test_completed_order_cannot_be_cancelled(
         cancel_response.json()["detail"]
         == "Completed orders cannot be cancelled"
     )
+
+
+def test_get_orders_returns_order_items(
+    authenticated_client,
+    organization,
+    customer,
+    product,
+):
+    create_response = authenticated_client.post(
+        f"/api/organizations/{organization.id}/orders/",
+        json={
+            "customer_id": customer.id,
+            "items": [
+                {
+                    "product_id": product.id,
+                    "quantity": 2,
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 200
+
+    list_response = authenticated_client.get(
+        f"/api/organizations/{organization.id}/orders/"
+    )
+
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["items"][0]["product_id"] == product.id
+    assert list_response.json()["items"][0]["items"][0]["quantity"] == 2

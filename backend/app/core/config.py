@@ -15,16 +15,27 @@ class Settings(BaseSettings):
     AUTH_LOGIN_RATE_LIMIT: int = 10
     AUTH_PASSWORD_RESET_RATE_LIMIT: int = 10
     AUTH_LOGOUT_RATE_LIMIT: int = 20
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 30
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 30
+    AUTH_RESEND_VERIFICATION_RATE_LIMIT: int = 5
 
     RESEND_API_KEY: str
     EMAIL_FROM: str
+    EMAIL_SUPPORT_EMAIL: str = "support@daymark.app"
+    EMAIL_LOGO_URL: str = ""
+    EMAIL_SUPPORT_EMAIL: str = "support@daymark.app"
+    EMAIL_LOGO_URL: str = ""
     FRONTEND_URL: str
 
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
+    PAYSTACK_SECRET_KEY: str = ""
+    PAYSTACK_WEBHOOK_SECRET: str = ""
+    BILLING_TRIAL_DAYS: int = 14
+    BILLING_GRACE_PERIOD_DAYS: int = 7
 
     model_config = SettingsConfigDict(env_file=".env")
 
 
-settings = Settings()
+settings = Settings()  # pyright: ignore[reportCallIssue]

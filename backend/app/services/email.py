@@ -1,79 +1,31 @@
+import logging
+from urllib.parse import quote
 import resend
-
 from app.core.config import settings
 
-
+logger = logging.getLogger(__name__)
 resend.api_key = settings.RESEND_API_KEY
 
+def _layout(title: str, body: str) -> str:
+    brand = f'<img src="{settings.EMAIL_LOGO_URL}" alt="Daymark" style="max-width:160px;max-height:48px">' if settings.EMAIL_LOGO_URL else '<div style="font-size:24px;font-weight:700;color:#ff5c35">Daymark</div>'
+    return f'''<div style="max-width:600px;margin:32px auto;padding:32px;background:#fff;color:#17211e;font-family:Arial,sans-serif;border:1px solid #e4e8df;border-radius:12px">{brand}<hr style="border:0;border-top:1px solid #e4e8df;margin:24px 0"><h1 style="font-size:28px">{title}</h1>{body}<p style="color:#69736d;font-size:12px;margin-top:28px">Need help? {settings.EMAIL_SUPPORT_EMAIL}</p></div>'''
 
-def send_password_reset_email(
-    recipient: str,
-    reset_url: str
-) -> None:
-    resend.Emails.send({
-        "from": settings.EMAIL_FROM,
-        "to": [recipient],
-        "subject": "Reset your password",
-        "html": f"""
-            <h2>Password Reset</h2>
+def _send(recipient: str, subject: str, title: str, body: str, text: str) -> bool:
+    try:
+        resend.Emails.send({"from": settings.EMAIL_FROM, "to": [recipient], "subject": subject, "html": _layout(title, body), "text": text})
+        return True
+    except Exception:
+        logger.exception("Transactional email delivery failed")
+        return False
 
-            <p>
-                We received a request to reset your password.
-            </p>
+def send_verification_email(recipient: str, name: str, token: str) -> bool:
+    url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={quote(token)}"
+    return _send(recipient, "Verify your Daymark email", "Verify your email", f"<p>Hi {name}, confirm your email to start using Daymark.</p><p><a href=\"{url}\">Verify email</a></p><p>This link expires in 30 minutes and can only be used once.</p>", f"Verify your Daymark email: {url}")
 
-            <p>
-                Click the link below to choose a new password:
-            </p>
+def send_password_reset_email(recipient: str, reset_url: str) -> bool:
+    return _send(recipient, "Reset your Daymark password", "Reset your password", f"<p><a href=\"{reset_url}\">Reset password</a></p><p>This link expires in 30 minutes.</p>", f"Reset your Daymark password: {reset_url}")
 
-            <p>
-                <a href="{reset_url}">
-                    Reset Password
-                </a>
-            </p>
-
-            <p>
-                This link will expire in 30 minutes.
-            </p>
-
-            <p>
-                If you did not request this, you can safely ignore this email.
-            </p>
-        """
-    })
-
-def send_organization_invitation_email(
-    recipient: str,
-    organization_name: str,
-    inviter_name: str,
-    role: str,
-    invitation_url: str
-) -> None:
-    resend.Emails.send({
-        "from": settings.EMAIL_FROM,
-        "to": [recipient],
-        "subject": f"Invitation to join {organization_name}",
-        "html": f"""
-            <h2>You're invited to join {organization_name}</h2>
-
-            <p>
-                {inviter_name} has invited you to join
-                <strong>{organization_name}</strong>
-                as a <strong>{role}</strong>.
-            </p>
-
-            <p>
-                <a href="{invitation_url}">
-                    Accept Invitation
-                </a>
-            </p>
-
-            <p>
-                This invitation will expire in 7 days.
-            </p>
-
-            <p>
-                If you were not expecting this invitation,
-                you can safely ignore this email.
-            </p>
-        """
-    })
+def send_organization_invitation_email(recipient: str, organization_name: str, inviter_name: str, role: str, invitation_url: str, expires_at=None) -> bool:
+    expiry = expires_at.strftime("%d %B %Y at %H:%M UTC") if expires_at else "7 days after this email is sent"
+    body = f"<p><strong>{inviter_name}</strong> invited you to join <strong>{organization_name}</strong> as a <strong>{role}</strong>.</p><p>This invitation expires on <strong>{expiry}</strong>.</p><p><a href=\"{invitation_url}\" style=\"display:inline-block;padding:13px 20px;background:#ff5c35;color:#fff;text-decoration:none;border-radius:6px;font-weight:700\">Accept invitation</a></p>"
+    return _send(recipient, f"Invitation to join {organization_name}", f"You're invited to {organization_name}", body, f"{inviter_name} invited you to join {organization_name} as {role}. This invitation expires on {expiry}. Accept your invitation: {invitation_url}")

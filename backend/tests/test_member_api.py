@@ -196,6 +196,49 @@ def test_cannot_change_owner_role(
     )
 
 
+def test_cannot_change_own_role(
+    client,
+    db,
+    organization,
+    user,
+):
+    admin_user = create_user(
+        db,
+        "admin-self-role@example.com",
+        "Admin Self Role",
+    )
+
+    member = Membership(
+        user_id=admin_user.id,
+        organization_id=organization.id,
+        role=MembershipRole.ADMIN,
+    )
+    db.add(member)
+    db.commit()
+
+    def override_current_user():
+        return admin_user
+
+    from app.api.dependencies import get_current_user
+    from app.main import app
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    try:
+        response = client.patch(
+            f"/api/organizations/{organization.id}/members/{admin_user.id}",
+            json={
+                "role": "manager",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "You cannot change your own role in this organization"
+    )
+
+
 def test_cannot_assign_owner_role(
     authenticated_client,
     db,

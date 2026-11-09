@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.organization import require_roles, get_user_membership
 from app.core.config import settings
@@ -21,11 +22,33 @@ from app.models.refresh_token import RefreshToken
 logger = logging.getLogger(__name__)
 
 
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
 
 router = APIRouter(
     prefix="/api/organizations/{organization_id}/invitations",
     tags=["Invitations"]
 )
+
+public_router = APIRouter(prefix="/api/invitations", tags=["Invitations"])
+
+@router.get("/")
+def list_invitations(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db),
+):
+    invitations = db.query(OrganizationInvitation).filter(
+        OrganizationInvitation.organization_id == organization_id,
+        OrganizationInvitation.accepted_at.is_(None),
+        OrganizationInvitation.expires_at > datetime.now(timezone.utc),
+    ).order_by(OrganizationInvitation.created_at.desc()).all()
+    return [{"id": item.id, "email": item.email, "role": item.role.value, "created_at": item.created_at, "expires_at": item.expires_at} for item in invitations]
 
 @router.post("/")
 def create_invitation(
@@ -116,9 +139,7 @@ def create_invitation(
     db.commit()
     db.refresh(invitation)
 
-    inviter = db.query(User).filter(
-        User.id == membership.user_id
-    ).first()
+    inviter = membership.user
 
     invitation_url = (
         f"{settings.FRONTEND_URL}/invitations/accept"
@@ -126,13 +147,18 @@ def create_invitation(
     )
 
     try:
-        send_organization_invitation_email(
+        sent = send_organization_invitation_email(
             recipient=email,
             organization_name=organization.name,
             inviter_name=inviter.full_name,
             role=data.role.value,
-            invitation_url=invitation_url
+            invitation_url=invitation_url,
+            expires_at=expires_at
         )
+        if not sent:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Invitation was saved, but the email provider did not accept the message. Please try again.")
+    except HTTPException:
+        raise
     except Exception:
         logger.exception(
             "Failed to send organization invitation email for organization_id=%s email=%s",
@@ -165,13 +191,14 @@ def accept_invitation(
             detail="Invalid invitation"
         )
 
+    existing_membership = db.query(Membership).filter(Membership.user_id == current_user.id, Membership.organization_id == invitation.organization_id).first()
     if invitation.accepted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invitation has already been accepted"
-        )
+        if existing_membership:
+            return {"message": "Invitation already accepted", "organization_id": invitation.organization_id, "role": existing_membership.role}
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitation has already been accepted")
 
-    if invitation.expires_at <= datetime.now(timezone.utc):
+    expires_at = _normalize_utc_datetime(invitation.expires_at)
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invitation has expired"
@@ -182,11 +209,6 @@ def accept_invitation(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This invitation was sent to a different email address"
         )
-
-    existing_membership = db.query(Membership).filter(
-        Membership.user_id == current_user.id,
-        Membership.organization_id == invitation.organization_id
-    ).first()
 
     if existing_membership:
         raise HTTPException(
@@ -212,10 +234,19 @@ def accept_invitation(
         description=f"Invitation for '{current_user.email}' was accepted"
     )
 
-    invitation.accepted_at = datetime.utcnow()
+    invitation.accepted_at = datetime.now(timezone.utc)
 
-    db.commit()
-    db.refresh(membership)
+    try:
+        db.commit()
+        db.refresh(membership)
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Invitation membership conflict for user_id=%s organization_id=%s", current_user.id, invitation.organization_id)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You may already belong to this organization, or the invitation is no longer available.")
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Invitation acceptance database failure for user_id=%s organization_id=%s", current_user.id, invitation.organization_id)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The organization could not be joined right now. Please try again.")
 
     return {
         "message": "Invitation accepted successfully",
@@ -248,7 +279,8 @@ def register_with_invitation(
             detail="Invitation has already been accepted"
         )
 
-    if invitation.expires_at <= datetime.now(timezone.utc):
+    expires_at = _normalize_utc_datetime(invitation.expires_at)
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invitation has expired"
@@ -294,7 +326,7 @@ def register_with_invitation(
         description=f"Invitation for '{user.email}' was accepted during signup"
     )
 
-    invitation.accepted_at = datetime.utcnow()
+    invitation.accepted_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(user)
@@ -435,25 +467,41 @@ def resend_invitation(
         datetime.now(timezone.utc) + timedelta(days=7)
     )
 
-    inviter = db.query(User).filter(
-        User.id == membership.user_id
-    ).first()
+    inviter = membership.user
 
     invitation_url = (
         f"{settings.FRONTEND_URL}/invitations/accept"
         f"?token={raw_token}"
     )
 
-    send_organization_invitation_email(
+    sent = send_organization_invitation_email(
         recipient=invitation.email,
         organization_name=organization.name,
         inviter_name=inviter.full_name,
         role=invitation.role.value,
-        invitation_url=invitation_url
+        invitation_url=invitation_url,
+        expires_at=invitation.expires_at
     )
+
+    if not sent:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="The invitation email could not be sent. Please try again.")
 
     db.commit()
 
     return {
         "message": "Invitation resent successfully"
     }
+
+@public_router.post("/accept")
+def public_accept_invitation(data: AcceptInvitationRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        return accept_invitation(data=data, current_user=current_user, db=db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Invitation acceptance failed for user_id=%s", current_user.id)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Invitation acceptance failed: {exc}")
+
+@public_router.post("/register")
+def public_register_with_invitation(data: RegisterWithInvitationRequest, db: Session = Depends(get_db)):
+    return register_with_invitation(data=data, db=db)

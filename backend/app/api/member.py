@@ -10,6 +10,7 @@ from app.schemas.member import (
     UpdateMemberRoleRequest,
 )
 from app.services.activity import create_activity
+from app.services.billing import enforce_limit
 
 
 router = APIRouter(
@@ -38,6 +39,7 @@ def list_members(
             "email": member.user.email,
             "full_name": member.user.full_name,
             "role": member.role,
+            "last_active": member.user.updated_at,
         }
         for member in members
     ]
@@ -54,6 +56,7 @@ def add_member(
     ),
     db: Session = Depends(get_db)
 ):
+    enforce_limit(db, organization_id, "team_members")
     user = db.query(User).filter(
         User.id == data.user_id
     ).first()
@@ -137,6 +140,12 @@ def update_member_role(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Owner role cannot be changed here"
+        )
+
+    if user_id == membership.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own role in this organization"
         )
 
     if data.role == MembershipRole.OWNER:

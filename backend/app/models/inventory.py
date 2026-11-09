@@ -78,6 +78,11 @@ class InventoryMovement(Base):
         nullable=False
     )
 
+    reason: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
     previous_stock: Mapped[int] = mapped_column(
         Integer,
         nullable=False
