@@ -1,9 +1,18 @@
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Enum as SQLEnum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+
+
+class PlatformRole(str, Enum):
+    USER = "user"
+    SUPER_ADMIN = "super_admin"
+    SUPPORT_ADMIN = "support_admin"
+    BILLING_ADMIN = "billing_admin"
+    PLATFORM_ANALYST = "platform_analyst"
 
 
 class User(Base):
@@ -40,6 +49,13 @@ class User(Base):
         nullable=True
     )
 
+    platform_role: Mapped[PlatformRole] = mapped_column(
+        SQLEnum(PlatformRole, values_callable=lambda enum_cls: [item.value for item in enum_cls]),
+        default=PlatformRole.USER,
+        nullable=False,
+        server_default=PlatformRole.USER.value,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -63,6 +79,6 @@ class User(Base):
         nullable=False
     )
 
-    is_email_verified: Mapped[bool] = mapped_column(
-        Boolean, default=True, server_default="true", nullable=False
-    )
+    @property
+    def is_super_admin(self) -> bool:
+        return self.platform_role == PlatformRole.SUPER_ADMIN

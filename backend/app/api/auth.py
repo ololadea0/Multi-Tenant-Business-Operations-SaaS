@@ -5,7 +5,6 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie, Request
-from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from authlib.integrations.starlette_client import OAuth
 
@@ -239,8 +238,10 @@ async def google_callback(
         path="/",
     )
 
-    redirect_url = f"{settings.FRONTEND_URL.rstrip('/')}/login#access_token={access_token}"
-    return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 
 @router.post(
     "/register",
@@ -379,7 +380,13 @@ def login(
 
     return {
         "access_token": access_token,
-        "token_type": "bearer"
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "platform_role": user.platform_role.value if getattr(user, "platform_role", None) else None,
+        },
     }
 
 @router.post(
@@ -504,7 +511,8 @@ def get_me(
         "email": current_user.email,
         "full_name": current_user.full_name,
         "avatar_url": current_user.avatar_url,
-        "is_active": current_user.is_active
+        "is_active": current_user.is_active,
+        "platform_role": current_user.platform_role.value if getattr(current_user, "platform_role", None) else None,
     }
 
 @router.post("/refresh")

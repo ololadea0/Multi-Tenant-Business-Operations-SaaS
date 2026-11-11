@@ -35,6 +35,8 @@ from app.api.activity import router as activity_router
 from app.api.dashboard import router as dashboard_router
 from app.api.sync import router as sync_router
 from app.api.billing import router as billing_router
+from app.api.admin import router as admin_router
+from app.api.notifications import router as notifications_router
 
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
@@ -102,6 +104,8 @@ app.include_router(activity_router)
 app.include_router(dashboard_router)
 app.include_router(sync_router)
 app.include_router(billing_router)
+app.include_router(admin_router)
+app.include_router(notifications_router)
 
 @app.get("/")
 def root():

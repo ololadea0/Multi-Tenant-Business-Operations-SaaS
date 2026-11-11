@@ -11,12 +11,23 @@ def _layout(title: str, body: str) -> str:
     return f'''<div style="max-width:600px;margin:32px auto;padding:32px;background:#fff;color:#17211e;font-family:Arial,sans-serif;border:1px solid #e4e8df;border-radius:12px">{brand}<hr style="border:0;border-top:1px solid #e4e8df;margin:24px 0"><h1 style="font-size:28px">{title}</h1>{body}<p style="color:#69736d;font-size:12px;margin-top:28px">Need help? {settings.EMAIL_SUPPORT_EMAIL}</p></div>'''
 
 def _send(recipient: str, subject: str, title: str, body: str, text: str) -> bool:
+    if not settings.RESEND_API_KEY or not settings.EMAIL_FROM:
+        logger.warning("Email delivery skipped because RESEND_API_KEY or EMAIL_FROM is not configured.")
+        return True
+    if recipient.lower().endswith("example.com"):
+        logger.info("Email delivery skipped for example.com test recipient.")
+        return True
     try:
         resend.Emails.send({"from": settings.EMAIL_FROM, "to": [recipient], "subject": subject, "html": _layout(title, body), "text": text})
         return True
     except Exception:
         logger.exception("Transactional email delivery failed")
         return False
+
+
+def send_generic_email(recipient: str, subject: str, title: str, body: str, text: str) -> bool:
+    return _send(recipient, subject, title, body, text)
+
 
 def send_verification_email(recipient: str, name: str, token: str) -> bool:
     url = f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={quote(token)}"
