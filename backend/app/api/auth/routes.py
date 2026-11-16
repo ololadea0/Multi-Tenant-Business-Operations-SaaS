@@ -1,0 +1,687 @@
+import hashlib
+import logging
+import secrets
+import re
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie, Request
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+from authlib.integrations.starlette_client import OAuth
+
+from app.api.dependencies import get_current_user
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.rate_limit import rate_limit
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    create_refresh_token,
+    hash_password,
+    hash_refresh_token,
+    verify_password,
+)
+
+from app.models.membership import Membership, MembershipRole
+from app.models.organization import Organization
+from app.models.password_reset_token import PasswordResetToken
+from app.models.refresh_token import RefreshToken
+from app.models.user import User
+from app.models.email_verification_token import EmailVerificationToken
+from app.schemas.auth import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    VerifyEmailRequest,
+    ProfileUpdateRequest,
+)
+from app.services.email import send_password_reset_email, send_verification_email
+from app.services.billing import get_or_create_trial
+
+oauth = OAuth()
+logger = logging.getLogger(__name__)
+
+oauth.register(
+    name="google",
+    client_id=settings.GOOGLE_CLIENT_ID,
+    client_secret=settings.GOOGLE_CLIENT_SECRET,
+    server_metadata_url=(
+        "https://accounts.google.com/.well-known/openid-configuration"
+    ),
+    client_kwargs={
+        "scope": "openid email profile"
+    }
+)
+
+
+def _send_password_reset_email(*args, **kwargs):
+    from app.api import auth as legacy_auth
+
+    legacy_sender = getattr(legacy_auth, "send_password_reset_email", None)
+    if legacy_sender is not None and legacy_sender is not _send_password_reset_email:
+        return legacy_sender(*args, **kwargs)
+    return send_password_reset_email(*args, **kwargs)
+
+
+def _send_verification_email(*args, **kwargs):
+    from app.api import auth as legacy_auth
+
+    legacy_sender = getattr(legacy_auth, "send_verification_email", None)
+    if legacy_sender is not None and legacy_sender is not _send_verification_email:
+        return legacy_sender(*args, **kwargs)
+    return send_verification_email(*args, **kwargs)
+
+
+router = APIRouter(
+    prefix="/api/auth",
+    tags=["Authentication"]
+)
+
+
+def validate_password_strength(password: str) -> None:
+    if (
+        len(password) < 8
+        or len(password) > 72
+        or not re.search(r"[A-Z]", password)
+        or not re.search(r"[a-z]", password)
+        or not re.search(r"\d", password)
+        or not re.search(r"[^\w\s]", password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Password must be at least 8 characters long and include an uppercase letter, "
+                "a lowercase letter, a number, and a special character."
+            )
+        )
+
+
+def normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def normalize_name(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if not normalized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Full name cannot be blank.",
+        )
+    return normalized
+
+
+def issue_verification_token(db: Session, user: User) -> str:
+    now = datetime.utcnow()
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now})
+    raw = secrets.token_urlsafe(32)
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        expires_at=now + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES),
+    ))
+    db.commit()
+    return raw
+
+
+@router.get("/google")
+async def google_login(request: Request):
+    redirect_uri = settings.GOOGLE_REDIRECT_URI
+
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri
+    )
+
+@router.get("/google/callback")
+async def google_callback(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get("userinfo")
+        if not user_info and token.get("id_token"):
+            user_info = await oauth.google.parse_id_token(request, token)
+    except Exception:
+        logger.exception("Google OAuth callback token exchange failed")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google sign-in could not be completed. Please try again.")
+
+    if not user_info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to retrieve Google user information"
+        )
+
+    google_id = user_info.get("sub")
+    email = user_info.get("email")
+    full_name = user_info.get("name")
+    avatar_url = user_info.get("picture")
+
+    if not google_id or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google account information is incomplete"
+        )
+
+    if not user_info.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google email is not verified"
+        )
+
+    user = db.query(User).filter(
+        User.google_id == google_id
+    ).first()
+
+    if not user:
+        user = db.query(User).filter(
+            User.email == email
+        ).first()
+
+    if not user:
+        user = User(
+            email=email,
+            full_name=full_name or email.split("@")[0],
+            google_id=google_id,
+            avatar_url=avatar_url,
+            is_email_verified=True,
+        )
+
+        db.add(user)
+        db.flush()
+
+        organization = Organization(
+            name=f"{user.full_name}'s Organization",
+            slug=f"user-{user.id}"
+        )
+
+        db.add(organization)
+        db.flush()
+
+        membership = Membership(
+            user_id=user.id,
+            organization_id=organization.id,
+            role=MembershipRole.OWNER
+        )
+
+        db.add(membership)
+        db.commit()
+        db.refresh(user)
+        get_or_create_trial(db, organization.id)
+
+    else:
+        if not user.google_id:
+            user.google_id = google_id
+
+        user.is_email_verified = True
+
+        if avatar_url:
+            user.avatar_url = avatar_url
+
+        db.commit()
+        db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    access_token = create_access_token(user.id)
+
+    raw_refresh_token, token_hash, expires_at = (
+        create_refresh_token()
+    )
+
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at
+    )
+
+    db.add(refresh_token)
+    db.commit()
+
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+
+    # OAuth providers return the browser to this endpoint. Redirect back to
+    # the SPA with the short-lived access token in the URL fragment so the
+    # token is never sent to the server as a query parameter or rendered as
+    # an unhandled JSON response.
+    callback_url = f"{settings.FRONTEND_URL.rstrip('/')}/login#access_token={access_token}"
+    if "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse(url=callback_url, status_code=status.HTTP_303_SEE_OTHER)
+    # Keep an API response for programmatic clients and existing integrations.
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post(
+    "/register",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[
+        Depends(rate_limit("register", limit=settings.AUTH_REGISTER_RATE_LIMIT, window_seconds=60))
+    ],
+)
+def register(
+    data: RegisterRequest,
+    db: Session = Depends(get_db)
+):
+    normalized_email = normalize_email(data.email)
+    normalized_name = normalize_name(data.full_name)
+    validate_password_strength(data.password)
+
+    existing_user = db.query(User).filter(
+        User.email == normalized_email
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered"
+        )
+
+    user = User(
+        email=normalized_email,
+        password_hash=hash_password(data.password),
+        full_name=normalized_name,
+        is_email_verified=False,
+    )
+
+    db.add(user)
+    db.flush()
+
+    organization = Organization(
+        name=data.business_name or f"{data.full_name}'s Organization",
+        slug=f"user-{user.id}"
+    )
+
+    db.add(organization)
+    db.flush()
+
+    membership = Membership(
+        user_id=user.id,
+        organization_id=organization.id,
+        role=MembershipRole.OWNER
+    )
+
+    db.add(membership)
+    db.commit()
+
+    db.refresh(user)
+    get_or_create_trial(db, organization.id)
+    token = issue_verification_token(db, user)
+    _send_verification_email(user.email, user.full_name, token)
+
+    return {
+        "message": "Registration successful",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name
+        },
+        "organization": {
+            "id": organization.id,
+            "name": organization.name,
+            "slug": organization.slug
+        }
+    }
+
+@router.post(
+    "/login",
+    dependencies=[Depends(rate_limit("login", limit=settings.AUTH_LOGIN_RATE_LIMIT, window_seconds=60))],
+)
+def login(
+    data: LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    normalized_email = normalize_email(data.email)
+
+    user = db.query(User).filter(
+        User.email == normalized_email
+    ).first()
+
+    if not user or not user.password_hash:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+
+    if not verify_password(
+        data.password,
+        user.password_hash
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    if not user.is_email_verified:
+        raise HTTPException(status_code=403, detail={"code": "email_verification_required", "email": user.email, "message": "Please verify your email address first."})
+
+    access_token = create_access_token(user.id)
+
+    raw_refresh_token, token_hash, expires_at = (
+        create_refresh_token()
+    )
+
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=expires_at
+    )
+
+    db.add(refresh_token)
+    db.commit()
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "platform_role": user.platform_role.value if getattr(user, "platform_role", None) else None,
+        },
+    }
+
+@router.post(
+    "/forgot-password",
+    dependencies=[Depends(rate_limit("forgot-password", limit=settings.AUTH_PASSWORD_RESET_RATE_LIMIT, window_seconds=60))],
+)
+def forgot_password(
+    data: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    normalized_email = normalize_email(data.email)
+
+    user = db.query(User).filter(
+        User.email == normalized_email
+    ).first()
+
+    if user:
+        raw_token, token_hash = create_password_reset_token()
+
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
+        )
+
+        reset_token = PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at
+        )
+
+        db.add(reset_token)
+        db.commit()
+
+        reset_url = (
+            f"{settings.FRONTEND_URL}"
+            f"/reset-password?token={raw_token}"
+        )
+
+        _send_password_reset_email(
+            user.email,
+            reset_url
+        )
+
+    return {
+        "message": "If an account with that email exists, "
+        "a password reset link has been sent."
+    }
+
+@router.post(
+    "/reset-password",
+    dependencies=[Depends(rate_limit("reset-password", limit=settings.AUTH_PASSWORD_RESET_RATE_LIMIT, window_seconds=60))],
+)
+def reset_password(
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    validate_password_strength(data.new_password)
+
+    token_hash = hashlib.sha256(
+        data.token.encode("utf-8")
+    ).hexdigest()
+
+    reset_token = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+
+    if not reset_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    if reset_token.used_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    expires_at = reset_token.expires_at
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    user = db.query(User).filter(
+        User.id == reset_token.user_id
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token"
+        )
+
+    user.password_hash = hash_password(data.new_password)
+
+    db.query(RefreshToken).filter(
+        RefreshToken.user_id == user.id,
+        RefreshToken.revoked_at.is_(None),
+    ).update({RefreshToken.revoked_at: now})
+
+    reset_token.used_at = now
+
+    db.commit()
+
+    return {
+        "message": "Password reset successful"
+    }
+
+@router.get("/me")
+def get_me(
+    current_user: User = Depends(get_current_user)
+):
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "avatar_url": current_user.avatar_url,
+        "is_active": current_user.is_active,
+        "platform_role": current_user.platform_role.value if getattr(current_user, "platform_role", None) else None,
+    }
+
+@router.post("/refresh")
+def refresh(
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token is missing"
+        )
+    token_hash = hash_refresh_token(refresh_token)
+
+    stored_token = db.query(RefreshToken).filter(
+        RefreshToken.token_hash == token_hash
+    ).first()
+
+    if not stored_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    now = datetime.now(timezone.utc)
+
+    if stored_token.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked"
+        )
+
+    expires_at = stored_token.expires_at
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired"
+        )
+
+    user = db.query(User).filter(
+        User.id == stored_token.user_id
+    ).first()
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User is not available"
+        )
+
+    stored_token.revoked_at = now
+
+    access_token = create_access_token(user.id)
+
+    new_raw_token, new_token_hash, new_expires_at = (
+        create_refresh_token()
+    )
+
+    response.set_cookie(
+        key="refresh_token",
+        value=new_raw_token,
+        httponly=True,
+        secure=settings.COOKIE_SECURE,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+
+    new_refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=new_token_hash,
+        expires_at=new_expires_at
+    )
+
+    db.add(new_refresh_token)
+    db.commit()
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+}
+
+@router.post(
+    "/logout",
+    dependencies=[Depends(rate_limit("logout", limit=settings.AUTH_LOGOUT_RATE_LIMIT, window_seconds=60))],
+)
+def logout(
+    response: Response,
+    refresh_token: str | None = Cookie(default=None),
+    db: Session = Depends(get_db)
+):
+    if refresh_token:
+        token_hash = hash_refresh_token(refresh_token)
+
+        stored_token = db.query(RefreshToken).filter(
+            RefreshToken.token_hash == token_hash
+        ).first()
+
+        if stored_token:
+            stored_token.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+    )
+
+    return {
+        "message": "Logout successful"
+    }
+
+
+@router.patch("/me")
+def update_me(data: ProfileUpdateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    current_user.full_name = normalize_name(data.full_name)
+    db.commit()
+    db.refresh(current_user)
+    return {"id": current_user.id, "email": current_user.email, "full_name": current_user.full_name, "avatar_url": current_user.avatar_url, "is_active": current_user.is_active}
+
+
+@router.post("/verify-email")
+def verify_email(data: VerifyEmailRequest, db: Session = Depends(get_db)):
+    token = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == hashlib.sha256(data.token.encode()).hexdigest()
+    ).first()
+    now = datetime.utcnow()
+    if not token or token.used_at is not None or token.expires_at < now:
+        raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+    user = db.query(User).filter(User.id == token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+    token.used_at = now
+    user.is_email_verified = True
+    db.commit()
+    return {"message": "Email verified successfully."}
+
+
+@router.post("/resend-verification", dependencies=[Depends(rate_limit("resend-verification", limit=settings.AUTH_RESEND_VERIFICATION_RATE_LIMIT, window_seconds=60))])
+def resend_verification(data: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == normalize_email(data.email)).first()
+    if user and not user.is_email_verified:
+        token = issue_verification_token(db, user)
+        _send_verification_email(user.email, user.full_name, token)
+    return {"message": "If an unverified account exists, a verification email has been sent."}

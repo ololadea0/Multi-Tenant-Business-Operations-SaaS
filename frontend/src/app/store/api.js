@@ -59,7 +59,7 @@ const offlineBaseQuery = async (args, api, extraOptions) => {
 export const daymarkApi = createApi({
   reducerPath: "daymarkApi",
   baseQuery: offlineBaseQuery,
-  tagTypes: ["Dashboard", "Product", "Customer", "Inventory", "Order", "Sync", "Billing", "Profile"],
+  tagTypes: ["Dashboard", "Product", "Customer", "Inventory", "Order", "Sync", "Billing", "Profile", "PlatformSettings"],
   endpoints: (build) => ({
     dashboard: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/dashboard/`, providesTags: ["Dashboard"] }),
     products: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/products/`, providesTags: ["Product"] }),
@@ -67,6 +67,7 @@ export const daymarkApi = createApi({
     updateProduct: build.mutation({ query: ({ organizationId, productId, ...body }) => ({ url: `/api/organizations/${organizationId}/products/${productId}`, method: "PATCH", body }), invalidatesTags: ["Product", "Inventory", "Dashboard"] }),
     customers: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/customers/`, providesTags: ["Customer"] }),
     createCustomer: build.mutation({ query: ({ organizationId, ...body }) => ({ url: `/api/organizations/${organizationId}/customers/`, method: "POST", body }), invalidatesTags: ["Customer", "Dashboard", "Sync"] }),
+    updateCustomer: build.mutation({ query: ({ organizationId, customerId, ...body }) => ({ url: `/api/organizations/${organizationId}/customers/${customerId}`, method: "PATCH", body }), invalidatesTags: ["Customer", "Dashboard", "Sync"] }),
     inventory: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/inventory/movements`, providesTags: ["Inventory"] }),
     createInventoryMovement: build.mutation({ query: ({ organizationId, productId, ...body }) => ({ url: `/api/organizations/${organizationId}/products/${productId}/inventory/`, method: "POST", body }), invalidatesTags: ["Inventory", "Product", "Dashboard", "Sync"] }),
     orders: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/orders/`, providesTags: ["Order"] }),
@@ -83,12 +84,28 @@ export const daymarkApi = createApi({
     revokeInvitation: build.mutation({ query: ({ organizationId, invitationId }) => ({ url: `/api/organizations/${organizationId}/invitations/${invitationId}`, method: "DELETE" }), invalidatesTags: ["Sync"] }),
     syncStatus: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/sync/status`, providesTags: ["Sync"] }),
     syncChanges: build.query({ query: ({ organizationId, since }) => ({ url: `/api/organizations/${organizationId}/sync/changes`, params: since ? { since } : undefined }), providesTags: ["Sync"] }),
-    plans: build.query({ query: () => "/api/billing/plans" }),
+    plans: build.query({ query: () => "/api/billing/plans", providesTags: ["Billing"] }),
+    updatePlan: build.mutation({ query: ({ plan_key, ...body }) => ({ url: `/api/admin/plans/${plan_key}`, method: "PATCH", body }), invalidatesTags: ["Billing"] }),
+    createPlan: build.mutation({ query: (body) => ({ url: "/api/admin/plans", method: "POST", body }), invalidatesTags: ["Billing"] }),
+    platformSettings: build.query({ query: () => "/api/admin/settings", providesTags: ["PlatformSettings"] }),
+    publicPlatformSettings: build.query({ query: () => "/api/admin/public/settings" }),
+    updatePlatformSettings: build.mutation({ query: (body) => ({ url: "/api/admin/settings", method: "PUT", body }), invalidatesTags: ["PlatformSettings"] }),
+    announcements: build.query({ query: ({ activeOnly = false } = {}) => ({ url: "/api/admin/announcements", params: { active_only: activeOnly } }) }),
+    publicAnnouncements: build.query({ query: ({ activeOnly = false } = {}) => ({ url: "/api/admin/public/announcements", params: { active_only: activeOnly } }) }),
+    createAnnouncement: build.mutation({ query: (body) => ({ url: "/api/admin/announcements", method: "POST", body }) }),
+    emailPreview: build.mutation({ query: (body) => ({ url: "/api/admin/email/preview", method: "POST", body }) }),
+    emailSend: build.mutation({ query: (body) => ({ url: "/api/admin/email/send", method: "POST", body }) }),
+    emailMetrics: build.query({ query: () => "/api/admin/email/metrics" }),
+    emailHistory: build.query({ query: ({ page = 1, limit = 25 } = {}) => ({ url: "/api/admin/email/history", params: { page, limit } }) }),
+    auditLogs: build.query({ query: ({ page = 1, limit = 20 } = {}) => ({ url: "/api/admin/audit-logs", params: { page, limit } }) }),
+    analytics: build.query({ query: () => "/api/admin/analytics" }),
+    platformHealth: build.query({ query: () => "/api/admin/health" }),
     billing: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/billing`, providesTags: ["Billing"] }),
     billingHistory: build.query({ query: (organizationId) => `/api/organizations/${organizationId}/billing/history`, providesTags: ["Billing"] }),
     initializeCheckout: build.mutation({ query: ({ organizationId, ...body }) => ({ url: `/api/organizations/${organizationId}/billing/checkout`, method: "POST", body }), invalidatesTags: ["Billing"] }),
     verifyPayment: build.mutation({ query: ({ organizationId, reference }) => ({ url: `/api/organizations/${organizationId}/billing/verify`, method: "POST", body: { reference } }), invalidatesTags: ["Billing"] }),
     cancelSubscription: build.mutation({ query: (organizationId) => ({ url: `/api/organizations/${organizationId}/billing/cancel`, method: "POST" }), invalidatesTags: ["Billing"] }),
+    adminDashboard: build.query({ query: () => "/api/admin/dashboard" }),
     login: build.mutation({ query: (body) => ({ url: "/api/auth/login", method: "POST", body }) }),
     register: build.mutation({ query: (body) => ({ url: "/api/auth/register", method: "POST", body }) }),
     registerInvitation: build.mutation({ query: (body) => ({ url: "/api/invitations/register", method: "POST", body }) }),
@@ -105,4 +122,5 @@ export const daymarkApi = createApi({
   }),
 })
 
-export const { useDashboardQuery, useProductsQuery, useCreateProductMutation, useUpdateProductMutation, useCreateInventoryMovementMutation, useCreateCustomerMutation, useCustomersQuery, useCreateOrderMutation, useCompleteOrderMutation, useCancelOrderMutation, useInventoryQuery, useOrdersQuery, useActivitiesQuery, useMembersQuery, useUpdateMemberRoleMutation, useRemoveMemberMutation, useInvitationsQuery, useCreateInvitationMutation, useResendInvitationMutation, useRevokeInvitationMutation, useAcceptInvitationMutation, useSyncStatusQuery, useSyncChangesQuery, usePlansQuery, useBillingQuery, useBillingHistoryQuery, useInitializeCheckoutMutation, useVerifyPaymentMutation, useCancelSubscriptionMutation, useLoginMutation, useRegisterMutation, useRegisterInvitationMutation, useVerifyEmailMutation, useResendVerificationMutation, useMeQuery, useUpdateMeMutation, useOrganizationsQuery, useOrganizationQuery, useCreateOrganizationMutation, useUpdateOrganizationMutation, useLeaveOrganizationMutation } = daymarkApi
+export const { useDashboardQuery, useProductsQuery, useCreateProductMutation, useUpdateProductMutation, useCreateInventoryMovementMutation, useCreateCustomerMutation, useUpdateCustomerMutation, useCustomersQuery, useCreateOrderMutation, useCompleteOrderMutation, useCancelOrderMutation, useInventoryQuery, useOrdersQuery, useActivitiesQuery, useMembersQuery, useUpdateMemberRoleMutation, useRemoveMemberMutation, useInvitationsQuery, useCreateInvitationMutation, useResendInvitationMutation, useRevokeInvitationMutation, useAcceptInvitationMutation, useSyncStatusQuery, useSyncChangesQuery, usePlansQuery, useUpdatePlanMutation, usePlatformSettingsQuery, usePublicPlatformSettingsQuery, useUpdatePlatformSettingsMutation, useAnnouncementsQuery, usePublicAnnouncementsQuery, useCreateAnnouncementMutation, useEmailPreviewMutation, useEmailSendMutation, useEmailMetricsQuery, useEmailHistoryQuery, useAuditLogsQuery, useAnalyticsQuery, usePlatformHealthQuery, useBillingQuery, useBillingHistoryQuery, useInitializeCheckoutMutation, useVerifyPaymentMutation, useCancelSubscriptionMutation, useAdminDashboardQuery, useLoginMutation, useRegisterMutation, useRegisterInvitationMutation, useVerifyEmailMutation, useResendVerificationMutation, useMeQuery, useUpdateMeMutation, useOrganizationsQuery, useOrganizationQuery, useCreateOrganizationMutation, useUpdateOrganizationMutation, useLeaveOrganizationMutation } = daymarkApi
+export const useCreatePlanMutation = daymarkApi.useCreatePlanMutation

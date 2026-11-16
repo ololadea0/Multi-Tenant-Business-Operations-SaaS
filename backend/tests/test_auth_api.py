@@ -1,8 +1,9 @@
-from app.models.user import User
+﻿from app.models.user import User
 from app.models.membership import Membership, MembershipRole
 from app.models.organization import Organization
 from app.models.billing import BillingInterval, OrganizationSubscription, PaymentStatus, PaymentTransaction, SubscriptionPlan, SubscriptionStatus
 from app.models.platform_settings import PlatformSettings
+from app.models.announcement import PlatformAnnouncement
 from datetime import datetime, timedelta, timezone
 
 from app.core.security import hash_refresh_token
@@ -331,6 +332,52 @@ def test_super_admin_can_manage_platform_announcements(client, db):
 
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["title"] == "Scheduled maintenance"
+
+
+def test_authenticated_user_can_read_public_maintenance_notice(client, db):
+    user = User(
+        email="business.owner@daymark.app",
+        full_name="Business Owner",
+        password_hash=hash_password("StrongPassword123!"),
+        is_active=True,
+        is_email_verified=True,
+        platform_role=PlatformRole.USER,
+    )
+    db.add(user)
+    db.flush()
+
+    db.add(
+        PlatformSettings(
+            maintenance_notice_enabled=True,
+            maintenance_message="Planned maintenance from 12:00 UTC",
+        )
+    )
+    db.add(
+        PlatformAnnouncement(
+            title="Scheduled maintenance",
+            message="The platform will be briefly unavailable for maintenance.",
+            kind="maintenance",
+            is_active=True,
+        )
+    )
+    db.commit()
+
+    token = create_access_token(user.id)
+
+    settings_response = client.get(
+        "/api/admin/public/settings",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert settings_response.status_code == 200
+    assert settings_response.json()["maintenance_notice_enabled"] is True
+
+    announcements_response = client.get(
+        "/api/admin/public/announcements",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"active_only": True},
+    )
+    assert announcements_response.status_code == 200
+    assert announcements_response.json()["items"][0]["title"] == "Scheduled maintenance"
 
 
 def test_super_admin_login_includes_platform_role(client, db):

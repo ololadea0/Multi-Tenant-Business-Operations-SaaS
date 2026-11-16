@@ -1,0 +1,214 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.api.platform_organization import get_user_membership, require_roles
+from app.core.database import get_db
+from app.models.membership import Membership, MembershipRole
+from app.models.user import User
+from app.schemas.member import (
+    AddMemberRequest,
+    UpdateMemberRoleRequest,
+)
+from app.services.activity import create_activity
+from app.services.billing import enforce_limit, require_subscription_write_access
+
+
+router = APIRouter(
+    prefix="/api/organizations/{organization_id}/members",
+    tags=["Members"],
+)
+
+
+@router.get("/")
+def list_members(
+    organization_id: int,
+    membership: Membership = Depends(get_user_membership),
+    db: Session = Depends(get_db),
+):
+    members = (
+        db.query(Membership)
+        .filter(Membership.organization_id == organization_id)
+        .all()
+    )
+
+    return [
+        {
+            "user_id": member.user_id,
+            "email": member.user.email,
+            "full_name": member.user.full_name,
+            "role": member.role,
+            "last_active": member.user.updated_at,
+        }
+        for member in members
+    ]
+
+
+@router.post("/")
+def add_member(
+    organization_id: int,
+    data: AddMemberRequest,
+    membership: Membership = Depends(
+        require_roles(MembershipRole.OWNER, MembershipRole.ADMIN)
+    ),
+    db: Session = Depends(get_db),
+):
+    require_subscription_write_access(db, organization_id)
+    enforce_limit(db, organization_id, "team_members")
+    user = db.query(User).filter(User.id == data.user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    existing_membership = db.query(Membership).filter(
+        Membership.user_id == data.user_id,
+        Membership.organization_id == organization_id,
+    ).first()
+
+    if existing_membership:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is already a member of this organization",
+        )
+
+    if data.role == MembershipRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the ownership transfer flow to assign ownership",
+        )
+
+    new_membership = Membership(
+        user_id=data.user_id,
+        organization_id=organization_id,
+        role=data.role,
+    )
+
+    db.add(new_membership)
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.added",
+        entity_type="member",
+        entity_id=new_membership.user_id,
+        description=f"Member '{user.email}' was added to the organization",
+    )
+
+    db.commit()
+    db.refresh(new_membership)
+
+    return {
+        "message": "Member added successfully",
+        "user_id": new_membership.user_id,
+        "organization_id": new_membership.organization_id,
+        "role": new_membership.role,
+    }
+
+
+@router.patch("/{user_id}")
+def update_member_role(
+    organization_id: int,
+    user_id: int,
+    data: UpdateMemberRoleRequest,
+    membership: Membership = Depends(require_roles(MembershipRole.OWNER, MembershipRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    require_subscription_write_access(db, organization_id)
+    target_membership = db.query(Membership).filter(
+        Membership.organization_id == organization_id,
+        Membership.user_id == user_id,
+    ).first()
+
+    if not target_membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found",
+        )
+
+    if target_membership.role == MembershipRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner role cannot be changed here",
+        )
+
+    if user_id == membership.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own role in this organization",
+        )
+
+    if data.role == MembershipRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use the ownership transfer flow to assign ownership",
+        )
+
+    target_membership.role = data.role
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.role_updated",
+        entity_type="member",
+        entity_id=target_membership.user_id,
+        description=(
+            f"Member '{target_membership.user.email}' role was changed "
+            f"to {data.role.value}"
+        ),
+    )
+
+    db.commit()
+    db.refresh(target_membership)
+
+    return {
+        "message": "Member role updated successfully",
+        "user_id": target_membership.user_id,
+        "role": target_membership.role,
+    }
+
+
+@router.delete("/{user_id}")
+def remove_member(
+    organization_id: int,
+    user_id: int,
+    membership: Membership = Depends(require_roles(MembershipRole.OWNER, MembershipRole.ADMIN)),
+    db: Session = Depends(get_db),
+):
+    require_subscription_write_access(db, organization_id)
+    target_membership = db.query(Membership).filter(
+        Membership.organization_id == organization_id,
+        Membership.user_id == user_id,
+    ).first()
+
+    if not target_membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found",
+        )
+
+    if target_membership.role == MembershipRole.OWNER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The organization owner cannot be removed",
+        )
+
+    create_activity(
+        db=db,
+        organization_id=organization_id,
+        user_id=membership.user_id,
+        action="member.removed",
+        entity_type="member",
+        entity_id=target_membership.user_id,
+        description=f"Member '{target_membership.user.email}' was removed from the organization",
+    )
+
+    db.delete(target_membership)
+    db.commit()
+
+    return {
+        "message": "Member removed successfully",
+    }

@@ -1,3 +1,5 @@
+import logging
+import threading
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -5,7 +7,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.models.billing import BillingInterval, OrganizationSubscription, SubscriptionPlan, SubscriptionStatus
+from app.models.platform_settings import PlatformSettings
 from app.models.customer import Customer
 from app.models.membership import Membership, MembershipRole
 from app.models.order import Order
@@ -13,24 +17,130 @@ from app.models.product import Product
 from app.models.user import User
 from app.services.email import send_generic_email
 
+logger = logging.getLogger(__name__)
+
+_billing_worker_thread: threading.Thread | None = None
+_billing_worker_stop = threading.Event()
+_billing_worker_last_cycle_at: datetime | None = None
+
+STALE_PLAN_KEYS = {"growth2", "growth_2", "growth-2", "growth 2"}
+
+
+def get_billing_worker_state() -> dict[str, object]:
+    return {
+        "running": bool(_billing_worker_thread and _billing_worker_thread.is_alive()),
+        "last_cycle_at": _billing_worker_last_cycle_at.isoformat() if _billing_worker_last_cycle_at else None,
+    }
+
+
+def run_billing_automation_cycle(db: Session | None = None) -> dict[str, int]:
+    global _billing_worker_last_cycle_at
+
+    session = db or SessionLocal()
+    should_close = db is None
+    updated = 0
+    try:
+        for subscription in session.query(OrganizationSubscription).all():
+            previous_status = subscription.status
+            refresh_subscription_status(session, subscription)
+            if subscription.status != previous_status:
+                updated += 1
+        reminders_processed = process_billing_reminders(session)
+        _billing_worker_last_cycle_at = datetime.utcnow()
+        return {"subscriptions_updated": updated, "reminders_processed": reminders_processed}
+    finally:
+        if should_close:
+            session.close()
+
+
+def start_billing_worker(interval_seconds: int = 300) -> threading.Thread | None:
+    global _billing_worker_thread
+
+    if _billing_worker_thread and _billing_worker_thread.is_alive():
+        return _billing_worker_thread
+
+    _billing_worker_stop.clear()
+
+    def _worker_loop() -> None:
+        while not _billing_worker_stop.wait(interval_seconds):
+            try:
+                result = run_billing_automation_cycle()
+                logger.info("Billing worker processed %s subscription updates and %s reminders.", result["subscriptions_updated"], result["reminders_processed"])
+            except Exception:
+                logger.exception("Billing automation cycle failed.")
+
+    _billing_worker_thread = threading.Thread(target=_worker_loop, name="daymark-billing-worker", daemon=True)
+    _billing_worker_thread.start()
+    logger.info("Started billing automation worker with %s second cadence.", interval_seconds)
+    return _billing_worker_thread
+
+
+def stop_billing_worker() -> None:
+    global _billing_worker_thread
+
+    _billing_worker_stop.set()
+    if _billing_worker_thread and _billing_worker_thread.is_alive():
+        _billing_worker_thread.join(timeout=5)
+        logger.info("Stopped billing automation worker.")
+
 DEFAULT_PLANS = (
-    ("starter", "Starter", 7500, 75000, 2, 100, 200, 1),
+    ("starter", "Launch", 0, 0, 1, 10, 25, 1),
     ("growth", "Growth", 15000, 150000, 5, 500, 1000, 2),
     ("business", "Business", 30000, 300000, 15, 2000, 5000, 3),
+    ("enterprise", "Enterprise", 60000, 600000, 30, 8000, 15000, 4),
 )
+DEFAULT_PLAN_KEYS = {key for key, *_ in DEFAULT_PLANS}
+
+
+def is_free_plan(plan: SubscriptionPlan) -> bool:
+    return (plan.monthly_price or 0) <= 0 and (plan.annual_price or 0) <= 0
 
 
 def ensure_plans(db: Session) -> None:
+    stale_plan_keys = {key.lower() for key in STALE_PLAN_KEYS}
+    for plan in db.query(SubscriptionPlan).all():
+        if plan.key and plan.key.lower() in stale_plan_keys:
+            db.delete(plan)
+
+    for key in DEFAULT_PLAN_KEYS:
+        duplicates = (
+            db.query(SubscriptionPlan)
+            .filter(func.lower(SubscriptionPlan.key) == key.lower())
+            .order_by(SubscriptionPlan.id.asc())
+            .all()
+        )
+        if len(duplicates) > 1:
+            for duplicate in duplicates[1:]:
+                db.delete(duplicate)
+
     for key, name, monthly, annual, members, products, orders, display_order in DEFAULT_PLANS:
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.key == key).first()
+        plan = db.query(SubscriptionPlan).filter(func.lower(SubscriptionPlan.key) == key.lower()).first()
         if not plan:
             db.add(SubscriptionPlan(key=key, name=name, description="Full Daymark platform access with usage limits.", monthly_price=monthly, annual_price=annual, currency="NGN", max_team_members=members, max_products=products, max_monthly_orders=orders, display_order=display_order, is_active=True))
     db.commit()
 
 
+def get_active_platform_billing_policy(db: Session) -> PlatformSettings:
+    config = db.query(PlatformSettings).first()
+    if config is None:
+        config = PlatformSettings(
+            trial_duration_days=settings.BILLING_TRIAL_DAYS,
+            payment_grace_period_days=settings.BILLING_GRACE_PERIOD_DAYS,
+            trial_plan_key="growth",
+            trial_enabled=True,
+            billing_intervals="monthly,annual",
+            renewal_policy="manual",
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+    return config
+
+
 def refresh_subscription_status(db: Session, subscription: OrganizationSubscription) -> OrganizationSubscription:
     now = datetime.utcnow()
     changed = False
+    policy = get_active_platform_billing_policy(db)
 
     if subscription.status == SubscriptionStatus.TRIALING and subscription.trial_end and now >= subscription.trial_end:
         subscription.status = SubscriptionStatus.EXPIRED
@@ -39,7 +149,7 @@ def refresh_subscription_status(db: Session, subscription: OrganizationSubscript
         changed = True
 
     if subscription.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE} and subscription.current_period_end:
-        grace_end = subscription.current_period_end + timedelta(days=settings.BILLING_GRACE_PERIOD_DAYS)
+        grace_end = subscription.current_period_end + timedelta(days=policy.payment_grace_period_days or settings.BILLING_GRACE_PERIOD_DAYS)
         subscription.grace_period_end = grace_end
 
         if now > grace_end:
@@ -199,9 +309,23 @@ def get_or_create_trial(db: Session, organization_id: int) -> OrganizationSubscr
     if subscription:
         return refresh_subscription_status(db, subscription)
     ensure_plans(db)
-    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.key == "growth").one()
+    policy = get_active_platform_billing_policy(db)
+    plan_key = policy.trial_plan_key or "starter"
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.key == plan_key).one()
     now = datetime.utcnow()
-    subscription = OrganizationSubscription(organization_id=organization_id, plan_id=plan.id, billing_interval=BillingInterval.MONTHLY, status=SubscriptionStatus.TRIALING, start_date=now, current_period_start=now, current_period_end=now + timedelta(days=settings.BILLING_TRIAL_DAYS), trial_start=now, trial_end=now + timedelta(days=settings.BILLING_TRIAL_DAYS))
+    trial_days = policy.trial_duration_days or settings.BILLING_TRIAL_DAYS
+    is_free = is_free_plan(plan)
+    subscription = OrganizationSubscription(
+        organization_id=organization_id,
+        plan_id=plan.id,
+        billing_interval=BillingInterval.MONTHLY,
+        status=SubscriptionStatus.ACTIVE if is_free else SubscriptionStatus.TRIALING,
+        start_date=now,
+        current_period_start=now,
+        current_period_end=now + timedelta(days=30 if is_free else trial_days),
+        trial_start=now if not is_free else None,
+        trial_end=now + timedelta(days=trial_days) if not is_free else None,
+    )
     db.add(subscription); db.commit(); db.refresh(subscription)
     return subscription
 

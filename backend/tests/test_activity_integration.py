@@ -1,4 +1,4 @@
-from app.models.activity import Activity
+﻿from app.models.activity import Activity
 from app.models.customer import Customer
 from app.models.user import User
 from app.services.activity import create_activity
@@ -87,7 +87,7 @@ def test_invitation_creation_creates_activity_record(
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "app.api.invitation.send_organization_invitation_email",
+        "app.api.invitations.send_organization_invitation_email",
         lambda **kwargs: None,
     )
 
@@ -126,3 +126,4 @@ def test_activity_service_rollback_discards_uncommitted_record(db, organization,
     db.rollback()
 
     assert db.query(Activity).filter(Activity.action == "activity.rollback_test").count() == 0
+

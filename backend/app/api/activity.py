@@ -6,6 +6,7 @@ from app.api.organization import get_user_membership
 from app.core.database import get_db
 from app.models.activity import Activity
 from app.models.membership import Membership
+from app.models.user import User
 
 router = APIRouter(
     prefix="/api/organizations/{organization_id}/activities",
@@ -41,6 +42,7 @@ def get_activities(
             "id": item.id,
             "organization_id": item.organization_id,
             "user_id": item.user_id,
+            "user_name": db.query(User.full_name).filter(User.id == item.user_id).scalar() if item.user_id else None,
             "action": item.action,
             "entity_type": item.entity_type,
             "entity_id": item.entity_id,

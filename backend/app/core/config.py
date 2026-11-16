@@ -21,11 +21,13 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: str
     EMAIL_FROM: str
-    EMAIL_SUPPORT_EMAIL: str = "support@daymark.app"
-    EMAIL_LOGO_URL: str = ""
+    EMAIL_FROM_NAME: str = "Daymark"
     EMAIL_SUPPORT_EMAIL: str = "support@daymark.app"
     EMAIL_LOGO_URL: str = ""
     FRONTEND_URL: str
+    WEBSITE_URL: str = ""
+    PRIVACY_POLICY_URL: str = ""
+    TERMS_URL: str = ""
 
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str

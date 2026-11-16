@@ -50,6 +50,46 @@ def test_manager_cannot_start_subscription_checkout(client, organization, db):
     app.dependency_overrides.clear()
 
 
+def test_free_plan_skips_payment_and_activates_subscription(client, organization, db, user):
+    plan = SubscriptionPlan(
+        key="starter",
+        name="Starter",
+        description="Free starter plan",
+        monthly_price=0,
+        annual_price=0,
+        currency="NGN",
+        max_team_members=1,
+        max_products=10,
+        max_monthly_orders=25,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    def override_current_user():
+        return user
+
+    from app.api.dependencies import get_current_user
+    from app.main import app
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    response = client.post(
+        f"/api/organizations/{organization.id}/billing/checkout",
+        json={
+            "plan_key": "starter",
+            "interval": "monthly",
+        },
+    )
+
+    assert response.status_code == 200
+    subscription = db.query(OrganizationSubscription).filter(OrganizationSubscription.organization_id == organization.id).one()
+    assert subscription.status == SubscriptionStatus.ACTIVE
+    assert subscription.plan_id == plan.id
+
+    app.dependency_overrides.clear()
+
+
 def test_expired_subscription_blocks_write_operations(client, organization, db, user):
     plan = SubscriptionPlan(
         key="growth",
@@ -262,6 +302,72 @@ def test_process_billing_reminders_sends_owner_email_for_expiring_subscription(d
         billing_service.send_generic_email = original
 
     assert result >= 1
+    assert any(item["recipient"] == owner.email for item in sent)
+
+
+def test_run_billing_automation_cycle_updates_expired_status_and_reminds_owner(db, organization):
+    plan = SubscriptionPlan(
+        key="growth",
+        name="Growth",
+        description="Growth plan",
+        monthly_price=15000,
+        annual_price=150000,
+        currency="NGN",
+        max_team_members=5,
+        max_products=500,
+        max_monthly_orders=1000,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    owner = User(
+        email="automation-owner@example.com",
+        full_name="Automation Owner",
+        password_hash="hashed",
+        is_active=True,
+    )
+    db.add(owner)
+    db.commit()
+    db.refresh(owner)
+
+    db.add(Membership(user_id=owner.id, organization_id=organization.id, role=MembershipRole.OWNER))
+    db.commit()
+
+    subscription = OrganizationSubscription(
+        organization_id=organization.id,
+        plan_id=plan.id,
+        billing_interval=BillingInterval.MONTHLY,
+        status=SubscriptionStatus.ACTIVE,
+        start_date=datetime.utcnow() - timedelta(days=45),
+        current_period_start=datetime.utcnow() - timedelta(days=45),
+        current_period_end=datetime.utcnow() - timedelta(days=20),
+        trial_start=None,
+        trial_end=None,
+    )
+    db.add(subscription)
+    db.commit()
+    db.refresh(subscription)
+
+    sent = []
+
+    def fake_send(recipient, subject, title, body, text):
+        sent.append({"recipient": recipient, "subject": subject})
+        return True
+
+    from app.services import billing as billing_service
+    original = billing_service.send_generic_email
+    billing_service.send_generic_email = fake_send
+    try:
+        result = billing_service.run_billing_automation_cycle(db)
+    finally:
+        billing_service.send_generic_email = original
+
+    refreshed = db.query(OrganizationSubscription).filter(OrganizationSubscription.id == subscription.id).one()
+
+    assert result["subscriptions_updated"] >= 1
+    assert result["reminders_processed"] >= 1
+    assert refreshed.status == SubscriptionStatus.EXPIRED
     assert any(item["recipient"] == owner.email for item in sent)
 
 

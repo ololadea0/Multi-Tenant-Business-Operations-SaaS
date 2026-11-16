@@ -1,4 +1,4 @@
-import { Link } from "react-router"
+import { Link } from "react-router";
 
 export function Logo({ light = false }) {
   return (
@@ -20,7 +20,7 @@ export function Logo({ light = false }) {
       </svg>
       <span>Daymark</span>
     </Link>
-  )
+  );
 }
 
 export function Arrow({ diagonal = false }) {
@@ -32,7 +32,7 @@ export function Arrow({ diagonal = false }) {
         <path d="M3 9h11m-4-4 4 4-4 4" />
       )}
     </svg>
-  )
+  );
 }
 
 export const MarkIcon = ({ name }) => {
@@ -72,10 +72,10 @@ export const MarkIcon = ({ name }) => {
         <path d="M5 20c.6-4.1 2.9-6 7-6s6.4 1.9 7 6" />
       </>
     ),
-  }
+  };
   return (
     <svg className="mark-icon" viewBox="0 0 24 24" aria-hidden="true">
       {paths[name]}
     </svg>
-  )
-}
+  );
+};

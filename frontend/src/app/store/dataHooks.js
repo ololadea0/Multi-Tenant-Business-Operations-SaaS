@@ -5,6 +5,16 @@ import { useEffect, useState } from "react"
 
 const unwrap = (value) => Array.isArray(value) ? value : value?.items || []
 
+const formatWatDate = (value, mode = "datetime") => {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+  const options = mode === "date"
+    ? { timeZone: "Africa/Lagos", dateStyle: "short" }
+    : { timeZone: "Africa/Lagos", dateStyle: "short", timeStyle: "short" }
+  return new Intl.DateTimeFormat("en-NG", options).format(date)
+}
+
 export function useOfflineQueue(organizationId) {
   const [operations, setOperations] = useState([])
   useEffect(() => {
@@ -31,10 +41,21 @@ export function useOrganizationData() {
   const currentUserId = meQuery.data?.id
   const currentUserEmail = meQuery.data?.email?.toLowerCase()
   const products = unwrap(productsQuery.data).map((product) => ({ ...product, stock: product.stock_quantity, threshold: product.low_stock_threshold, price: Number(product.unit_price || 0), cost: Number(product.cost_price || 0), status: product.status || "ACTIVE" }))
-  const customers = unwrap(customersQuery.data).map((customer) => ({ ...customer, orders: customer.order_count || 0 }))
-  const orders = unwrap(ordersQuery.data).map((order) => ({ ...order, number: order.order_number, amount: Number(order.total_amount || 0), customer: order.customer_id, date: order.created_at ? new Date(order.created_at).toLocaleDateString() : "—" }))
-  const movements = unwrap(inventoryQuery.data).map((movement) => ({ ...movement, product: movement.product_name || products.find((item) => item.id === movement.product_id)?.name || `Product #${movement.product_id}`, type: String(movement.movement_type || "").toUpperCase(), date: movement.created_at ? new Date(movement.created_at).toLocaleString() : "—", previous: movement.previous_stock, current: movement.new_stock, user: movement.recorded_by || (movement.user_id ? `User #${movement.user_id}` : "Unknown") }))
-  const activities = unwrap(activitiesQuery.data).map((activity) => ({ ...activity, category: activity.category || activity.entity_type || "activity", detail: activity.detail || activity.description || "", user: activity.user || (activity.user_id ? `User #${activity.user_id}` : "System"), time: activity.time || (activity.created_at ? new Date(activity.created_at).toLocaleString() : "—") }))
+  const customers = unwrap(customersQuery.data).map((customer) => ({
+    ...customer,
+    orders: customer.order_count || 0,
+    added: customer.created_at ? formatWatDate(customer.created_at, "date") : "—",
+    joined: customer.created_at ? formatWatDate(customer.created_at, "date") : "—",
+  }))
+  const orders = unwrap(ordersQuery.data).map((order) => ({ ...order, number: order.order_number, amount: Number(order.total_amount || 0), customer: order.customer_id, date: order.created_at ? formatWatDate(order.created_at, "date") : "—" }))
+  const movements = unwrap(inventoryQuery.data).map((movement) => ({ ...movement, product: movement.product_name || products.find((item) => item.id === movement.product_id)?.name || `Product #${movement.product_id}`, type: String(movement.movement_type || "").toUpperCase(), date: movement.created_at ? formatWatDate(movement.created_at) : "—", previous: movement.previous_stock, current: movement.new_stock, user: movement.recorded_by || (movement.user_id ? `User #${movement.user_id}` : "Unknown") }))
+  const activities = unwrap(activitiesQuery.data).map((activity) => ({
+    ...activity,
+    category: activity.category || activity.entity_type || "activity",
+    detail: activity.detail || activity.description || "",
+    user: activity.user_name || activity.user || (activity.user_id ? `User #${activity.user_id}` : "System"),
+    time: activity.time || (activity.created_at ? formatWatDate(activity.created_at) : "—"),
+  }))
   const team = unwrap(membersQuery.data).map((member) => {
     const isMe = member.user_id === currentUserId || member.email?.toLowerCase() === currentUserEmail
     const lastActive = member.last_active ? new Date(member.last_active) : null

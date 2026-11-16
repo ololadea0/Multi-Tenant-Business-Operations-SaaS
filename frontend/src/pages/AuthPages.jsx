@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router"
-import { Arrow, Logo } from "../components/Brand"
-import { useDispatch } from "react-redux"
-import { signedIn } from "../app/store/slices"
-import { useAcceptInvitationMutation, useLoginMutation, useRegisterInvitationMutation, useRegisterMutation } from "../app/store/api"
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { Arrow, Logo } from "../components/Brand";
+import { useDispatch } from "react-redux";
+import { signedIn } from "../app/store/slices";
+import {
+  useAcceptInvitationMutation,
+  useLoginMutation,
+  useRegisterInvitationMutation,
+  useRegisterMutation,
+} from "../app/store/api";
 
 function GoogleButton() {
   return (
-    <a className="google-button" href={`${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/auth/google`}>
+    <a
+      className="google-button"
+      href={`${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/auth/google`}
+    >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
           fill="#4285F4"
@@ -28,7 +36,7 @@ function GoogleButton() {
       </svg>
       Continue with Google
     </a>
-  )
+  );
 }
 
 function AuthHeader({ title, copy }) {
@@ -40,38 +48,55 @@ function AuthHeader({ title, copy }) {
       <h1>{title}</h1>
       <p className="auth-copy">{copy}</p>
     </>
-  )
+  );
 }
 
 export function Login() {
-  const navigate = useNavigate()
-  const [showPassword, setShowPassword] = useState(false)
-  const dispatch = useDispatch()
-  const [login, { isLoading, error }] = useLoginMutation()
-  const [acceptInvitation, acceptState] = useAcceptInvitationMutation()
-  const [params] = useSearchParams()
+  const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
+  const dispatch = useDispatch();
+  const [login, { isLoading, error }] = useLoginMutation();
+  const [acceptInvitation, acceptState] = useAcceptInvitationMutation();
+  const [params] = useSearchParams();
   useEffect(() => {
-    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""))
-    const accessToken = hash.get("access_token")
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const accessToken = hash.get("access_token");
     if (accessToken) {
-      localStorage.setItem("daymark.accessToken", accessToken)
-      dispatch(signedIn({ token: accessToken }))
-      window.history.replaceState({}, "", "/login")
-      navigate("/app/organizations", { replace: true })
+      localStorage.setItem("daymark.accessToken", accessToken);
+      dispatch(signedIn({ token: accessToken }));
+      window.history.replaceState({}, "", "/login");
+      fetch(`${import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"}/api/auth/me`, {
+        credentials: "include",
+        headers: { authorization: `Bearer ${accessToken}` },
+      })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load profile")))
+        .then((user) => navigate(user.platform_role === "super_admin" ? "/admin" : "/app/organizations", { replace: true }))
+        .catch(() => navigate("/login", { replace: true }));
     }
-  }, [dispatch, navigate])
+  }, [dispatch, navigate]);
   async function submit(event) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
     try {
-      const result = await login({ email: form.get("email"), password: form.get("password") }).unwrap()
-      localStorage.setItem("daymark.accessToken", result.access_token)
-      dispatch(signedIn({ token: result.access_token }))
-      const inviteToken = params.get("invite")
+      const result = await login({
+        email: form.get("email"),
+        password: form.get("password"),
+      }).unwrap();
+      localStorage.setItem("daymark.accessToken", result.access_token);
+      dispatch(signedIn({ token: result.access_token }));
+
+      if (result?.user?.platform_role === "super_admin") {
+        navigate("/admin", { replace: true });
+        return;
+      }
+
+      const inviteToken = params.get("invite");
       if (inviteToken) {
-        const invitation = await acceptInvitation({ token: inviteToken }).unwrap()
-        navigate(`/app/${invitation.organization_id}/dashboard`)
-      } else navigate("/app/organizations")
+        const invitation = await acceptInvitation({
+          token: inviteToken,
+        }).unwrap();
+        navigate(`/app/${invitation.organization_id}/dashboard`);
+      } else navigate("/app/organizations");
     } catch {}
   }
   return (
@@ -84,9 +109,7 @@ export function Login() {
       <div className="or">
         <span>or continue with email</span>
       </div>
-      <form
-        onSubmit={submit}
-      >
+      <form onSubmit={submit}>
         <label>
           Email address
           <input
@@ -109,30 +132,72 @@ export function Login() {
               autoComplete="current-password"
               placeholder="Enter your password"
             />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
           </div>
         </label>
         <button className="button button-dark full" type="submit">
           {isLoading ? "Logging in…" : "Log in"} <Arrow />
         </button>
-        {error && <p className="form-error" role="alert"><strong>{error?.data?.detail?.code === "email_verification_required" ? "Verify your email first" : "Sign-in failed"}</strong><span>{error?.data?.detail?.code === "email_verification_required" ? <Link to={`/verify-email/sent?email=${encodeURIComponent(error.data.detail.email || "")}`}>Resend the verification email</Link> : "Unable to sign in. Check your email and password, then try again."}</span></p>}
-        {acceptState.error && <p className="form-error" role="alert"><strong>Could not join the organization</strong><span>{acceptState.error?.data?.detail || "This invitation may be expired, already accepted, or sent to another email address."}</span></p>}
+        {error && (
+          <p className="form-error" role="alert">
+            <strong>
+              {error?.data?.detail?.code === "email_verification_required"
+                ? "Verify your email first"
+                : "Sign-in failed"}
+            </strong>
+            <span>
+              {error?.data?.detail?.code === "email_verification_required" ? (
+                <Link
+                  to={`/verify-email/sent?email=${encodeURIComponent(error.data.detail.email || "")}`}
+                >
+                  Resend the verification email
+                </Link>
+              ) : (
+                "Unable to sign in. Check your email and password, then try again."
+              )}
+            </span>
+          </p>
+        )}
+        {acceptState.error && (
+          <p className="form-error" role="alert">
+            <strong>Could not join the organization</strong>
+            <span>
+              {acceptState.error?.data?.detail ||
+                "This invitation may be expired, already accepted, or sent to another email address."}
+            </span>
+          </p>
+        )}
       </form>
       <p className="auth-switch">
         New to Daymark? <Link to="/register">Create an account</Link>
       </p>
     </div>
-  )
+  );
 }
 
 export function Register() {
-  const navigate = useNavigate()
-  const [showPassword, setShowPassword] = useState(false)
-  const [register, { isLoading, error }] = useRegisterMutation()
+  const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
+  const [register, { isLoading, error }] = useRegisterMutation();
   async function submit(event) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    try { const email = form.get("email"); await register({ email, full_name: `${form.get("first_name")} ${form.get("last_name")}`, business_name: form.get("business_name"), password: form.get("password") }).unwrap(); navigate(`/verify-email/sent?email=${encodeURIComponent(email)}`) } catch {}
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const email = form.get("email");
+      await register({
+        email,
+        full_name: `${form.get("first_name")} ${form.get("last_name")}`,
+        business_name: form.get("business_name"),
+        password: form.get("password"),
+      }).unwrap();
+      navigate(`/verify-email/sent?email=${encodeURIComponent(email)}`);
+    } catch {}
   }
   return (
     <div className="auth-card register-card">
@@ -144,9 +209,7 @@ export function Register() {
       <div className="or">
         <span>or continue with email</span>
       </div>
-      <form
-        onSubmit={submit}
-      >
+      <form onSubmit={submit}>
         <div className="field-row">
           <label>
             First name
@@ -167,7 +230,7 @@ export function Register() {
             placeholder="you@company.com"
           />
         </label>
-          <label>
+        <label>
           Business name <span className="optional-label">(optional)</span>
           <input name="business_name" autoComplete="organization" />
         </label>
@@ -182,7 +245,13 @@ export function Register() {
               autoComplete="new-password"
               placeholder="At least 8 characters"
             />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? "Hide" : "Show"}</button>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
           </div>
         </label>
         <label className="check-label">
@@ -195,34 +264,106 @@ export function Register() {
         <button className="button button-dark full" type="submit">
           {isLoading ? "Creating account…" : "Create account"} <Arrow />
         </button>
-        {error && <p className="form-error" role="alert"><strong>Account creation failed</strong><span>Check the form details and try again.</span></p>}
+        {error && (
+          <p className="form-error" role="alert">
+            <strong>Account creation failed</strong>
+            <span>Check the form details and try again.</span>
+          </p>
+        )}
       </form>
       <p className="auth-switch">
         Already have an account? <Link to="/login">Log in</Link>
       </p>
     </div>
-  )
+  );
 }
 
 export function InvitationRegister() {
-  const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const [showPassword, setShowPassword] = useState(false)
-  const [registerInvitation, { isLoading, error }] = useRegisterInvitationMutation()
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [showPassword, setShowPassword] = useState(false);
+  const [registerInvitation, { isLoading, error }] =
+    useRegisterInvitationMutation();
   async function submit(event) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
     try {
-      const result = await registerInvitation({ token: params.get("token"), email: form.get("email"), full_name: `${form.get("first_name")} ${form.get("last_name")}`, password: form.get("password") }).unwrap()
-      localStorage.setItem("daymark.accessToken", result.access_token)
-      navigate(`/app/${result.organization_id}/dashboard`)
+      const result = await registerInvitation({
+        token: params.get("token"),
+        email: form.get("email"),
+        full_name: `${form.get("first_name")} ${form.get("last_name")}`,
+        password: form.get("password"),
+      }).unwrap();
+      localStorage.setItem("daymark.accessToken", result.access_token);
+      navigate(`/app/${result.organization_id}/dashboard`);
     } catch {}
   }
-  return <div className="auth-card register-card"><AuthHeader title="Join your organization." copy="Create your Daymark account to accept this invitation." /><form onSubmit={submit}><div className="field-row"><label>First name *<input name="first_name" required autoComplete="given-name" /></label><label>Last name *<input name="last_name" required autoComplete="family-name" /></label></div><label>Invited email *<input name="email" type="email" required autoComplete="email" /></label><label>Password *<div className="password-field"><input name="password" type={showPassword ? "text" : "password"} required minLength={8} autoComplete="new-password" /><button type="button" onClick={() => setShowPassword(!showPassword)}>{showPassword ? "Hide" : "Show"}</button></div></label><button className="button button-dark full" disabled={isLoading}>{isLoading ? "Joining…" : "Join organization"}</button>{error && <p className="form-error" role="alert"><strong>Invitation could not be accepted</strong><span>{error?.data?.detail || "Check that the invitation link is valid and has not expired."}</span></p>}</form><p className="auth-switch">Already have an account? <Link to={`/login?invite=${encodeURIComponent(params.get("token") || "")}`}>Log in to accept the invitation</Link></p></div>
+  return (
+    <div className="auth-card register-card">
+      <AuthHeader
+        title="Join your organization."
+        copy="Create your Daymark account to accept this invitation."
+      />
+      <form onSubmit={submit}>
+        <div className="field-row">
+          <label>
+            First name *
+            <input name="first_name" required autoComplete="given-name" />
+          </label>
+          <label>
+            Last name *
+            <input name="last_name" required autoComplete="family-name" />
+          </label>
+        </div>
+        <label>
+          Invited email *
+          <input name="email" type="email" required autoComplete="email" />
+        </label>
+        <label>
+          Password *
+          <div className="password-field">
+            <input
+              name="password"
+              type={showPassword ? "text" : "password"}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </button>
+          </div>
+        </label>
+        <button className="button button-dark full" disabled={isLoading}>
+          {isLoading ? "Joining…" : "Join organization"}
+        </button>
+        {error && (
+          <p className="form-error" role="alert">
+            <strong>Invitation could not be accepted</strong>
+            <span>
+              {error?.data?.detail ||
+                "Check that the invitation link is valid and has not expired."}
+            </span>
+          </p>
+        )}
+      </form>
+      <p className="auth-switch">
+        Already have an account?{" "}
+        <Link
+          to={`/login?invite=${encodeURIComponent(params.get("token") || "")}`}
+        >
+          Log in to accept the invitation
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 export function ForgotPassword() {
-  const [sent, setSent] = useState(false)
+  const [sent, setSent] = useState(false);
   return (
     <div className="auth-card narrow">
       {sent ? (
@@ -243,8 +384,8 @@ export function ForgotPassword() {
           />
           <form
             onSubmit={(e) => {
-              e.preventDefault()
-              setSent(true)
+              e.preventDefault();
+              setSent(true);
             }}
           >
             <label>
@@ -266,7 +407,7 @@ export function ForgotPassword() {
         </>
       )}
     </div>
-  )
+  );
 }
 
 export function ResetPassword() {
@@ -300,9 +441,9 @@ export function ResetPassword() {
         </button>
       </form>
     </div>
-  )
+  );
 }
 
 function prevent(e) {
-  e.preventDefault()
+  e.preventDefault();
 }

@@ -3156,8 +3156,15 @@ textarea:focus {
   color: #58635e;
   font-size: 9px;
 }
+.app-table tbody tr {
+  cursor: pointer;
+}
 .app-table tbody tr:hover {
   background: #fafbf8;
+}
+.app-table tbody tr:focus-visible {
+  outline: 2px solid rgba(35, 68, 57, 0.28);
+  outline-offset: -2px;
 }
 .app-table td b {
   color: #26312d;
@@ -4344,7 +4351,7 @@ textarea:focus {
   display: block;
 }
 .danger-zone span b {
-  font-size: 10px;
+  font-size: 14px;
 }
 .danger-zone span small {
   margin-top: 5px;
@@ -5534,6 +5541,21 @@ textarea:focus {
 }
 .daymark-error-actions .app-btn {
   text-decoration: none;
+}
+@media (max-width: 640px) {
+  .daymark-error-page {
+    padding: 20px 14px;
+  }
+  .daymark-error-card {
+    padding: 24px 18px;
+  }
+  .daymark-error-actions {
+    flex-direction: column;
+  }
+  .daymark-error-actions .app-btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 .app-nav {
   flex: 1;

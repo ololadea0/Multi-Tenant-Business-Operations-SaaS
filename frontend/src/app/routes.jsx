@@ -1,22 +1,21 @@
-import { createBrowserRouter } from "react-router"
-import { PublicLayout, AuthLayout } from "../components/Layout"
-import { Home } from "../pages/Home"
-import { Features, Solutions, About, Contact } from "../pages/PublicPages"
+import { createBrowserRouter } from "react-router";
+import { PublicLayout, AuthLayout } from "../components/Layout";
+import { Home } from "../pages/Home";
+import { Features, Solutions, About, Contact } from "../pages/PublicPages";
 import {
   Login,
   Register,
   InvitationRegister,
   ForgotPassword,
   ResetPassword,
-} from "../pages/AuthPages"
-import { Privacy, Terms } from "../pages/LegalPages"
-import { Pricing } from "../pages/Pricing"
-import { VerifyEmail, VerificationSent } from "../pages/EmailVerification"
-import { AppLayout, Organizations } from "./application/AppLayout"
-import { Dashboard } from "./application/Dashboard"
+} from "../pages/AuthPages";
+import { Privacy, Terms } from "../pages/LegalPages";
+import { Pricing } from "../pages/Pricing";
+import { VerifyEmail, VerificationSent } from "../pages/EmailVerification";
+import { AppLayout, Organizations } from "../features/app/layout/AppLayout";
+import { Dashboard } from "../features/app/pages/DashboardPage";
+import { Products, ProductForm } from "../features/app/pages/ProductsPages";
 import {
-  Products,
-  ProductForm,
   ProductDetails,
   Inventory,
   Customers,
@@ -25,7 +24,7 @@ import {
   Orders,
   CreateOrder,
   OrderDetails,
-} from "./application/CommercePages"
+} from "../features/app/pages/CommercePages";
 import {
   Activity,
   Team,
@@ -33,10 +32,41 @@ import {
   Settings,
   Profile,
   SyncCentre,
-} from "./application/ManagementPages"
-import { Billing } from "./application/Billing"
-import { PaymentReturn } from "./application/PaymentReturn"
-import { NotFoundPage, RouteErrorPage } from "../components/ErrorBoundary"
+} from "../features/app/pages/ManagementPages";
+import { Billing } from "../features/app/pages/BillingPage";
+import { PaymentReturn } from "../features/app/pages/PaymentReturnPage";
+import { AdminLayout } from "../features/admin/AdminLayout";
+import { AdminOverview } from "../features/admin/pages/OverviewPage";
+import {
+  Businesses,
+  Users,
+  Subscriptions,
+  Payments,
+  Plans,
+} from "../features/admin/pages/BusinessAdminPages";
+import {
+  EmailCentreOverview,
+  EmailCompose,
+  EmailTemplates,
+  EmailAutomation,
+  EmailHistory,
+} from "../features/admin/pages/CommunicationPages";
+import {
+  Analytics,
+  PlatformSettings,
+  SystemHealth,
+  SupportTickets,
+  FeedbackBoard,
+  Promotions,
+} from "../features/admin/pages/OperationsPages";
+import {
+  Announcements,
+  AuditLogs,
+  FeatureFlags as GovernanceFeatureFlags,
+  SecurityAccess as GovernanceSecurityAccess,
+  Backups as GovernanceBackups,
+} from "../features/admin/pages/GovernancePages";
+import { NotFoundPage, RouteErrorPage } from "../components/ErrorBoundary";
 
 export const router = createBrowserRouter([
   {
@@ -66,6 +96,35 @@ export const router = createBrowserRouter([
       { path: "verify-email/sent", Component: VerificationSent },
     ],
   },
+  {
+    path: "admin",
+    Component: AdminLayout,
+    errorElement: <RouteErrorPage />,
+    children: [
+      { index: true, Component: AdminOverview },
+      { path: "businesses", Component: Businesses },
+      { path: "users", Component: Users },
+      { path: "subscriptions", Component: Subscriptions },
+      { path: "payments", Component: Payments },
+      { path: "plans", Component: Plans },
+      { path: "email-centre", Component: EmailCentreOverview },
+      { path: "email-centre/compose", Component: EmailCompose },
+      { path: "email-centre/templates", Component: EmailTemplates },
+      { path: "email-centre/automation", Component: EmailAutomation },
+      { path: "email-centre/history", Component: EmailHistory },
+      { path: "analytics", Component: Analytics },
+      { path: "health", Component: SystemHealth },
+      { path: "support", Component: SupportTickets },
+      { path: "feedback", Component: FeedbackBoard },
+      { path: "promotions", Component: Promotions },
+      { path: "announcements", Component: Announcements },
+      { path: "feature-flags", Component: GovernanceFeatureFlags },
+      { path: "security", Component: GovernanceSecurityAccess },
+      { path: "backups", Component: GovernanceBackups },
+      { path: "settings", Component: PlatformSettings },
+      { path: "audit-logs", Component: AuditLogs },
+    ],
+  },
   { path: "app/organizations", Component: Organizations },
   {
     path: "app/:organizationId",
@@ -81,6 +140,7 @@ export const router = createBrowserRouter([
       { path: "inventory", Component: Inventory },
       { path: "customers", Component: Customers },
       { path: "customers/new", Component: CustomerForm },
+      { path: "customers/:customerId/edit", Component: CustomerForm },
       { path: "customers/:customerId", Component: CustomerDetails },
       { path: "orders", Component: Orders },
       { path: "orders/new", Component: CreateOrder },
@@ -97,7 +157,7 @@ export const router = createBrowserRouter([
     ],
   },
   { path: "*", Component: NotFoundPage },
-])
+]);
 
 function NotFound() {
   return (
@@ -110,5 +170,5 @@ function NotFound() {
         </a>
       </div>
     </main>
-  )
+  );
 }

@@ -1,7 +1,7 @@
-import { useState } from "react"
-import { Link } from "react-router"
-import { Arrow, MarkIcon } from "../components/Brand"
-import { ProductMockup } from "../components/ProductMockup"
+import { useState } from "react";
+import { Link } from "react-router";
+import { Arrow, MarkIcon } from "../components/Brand";
+import { ProductMockup } from "../features/public/components/ProductMockup";
 
 const capabilities = [
   [
@@ -40,7 +40,7 @@ const capabilities = [
     "Give each person the access they need—and nothing they do not.",
     "team",
   ],
-]
+];
 
 const faqs = [
   [
@@ -71,7 +71,7 @@ const faqs = [
     "How do I get started?",
     "Create an account, set up your workspace, add your business information and products, then invite your team.",
   ],
-]
+];
 
 export function Home() {
   return (
@@ -342,11 +342,11 @@ export function Home() {
         </Link>
       </section>
     </main>
-  )
+  );
 }
 
 function SyncDemo() {
-  const [online, setOnline] = useState(false)
+  const [online, setOnline] = useState(false);
   return (
     <div className={`sync-demo ${online ? "online" : ""}`}>
       <div className="sync-top">
@@ -387,11 +387,11 @@ function SyncDemo() {
         <i />
       </div>
     </div>
-  )
+  );
 }
 
 function Faq({ q, a }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
   return (
     <div className={`faq-item ${open ? "open" : ""}`}>
       <button onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -402,5 +402,5 @@ function Faq({ q, a }) {
         <p>{a}</p>
       </div>
     </div>
-  )
+  );
 }

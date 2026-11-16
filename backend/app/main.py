@@ -24,19 +24,20 @@ from app.core.errors import (
 
 from app.core.database import engine
 from app.api.auth import router as auth_router
-from app.api.organization import router as organization_router
-from app.api.member import router as member_router
-from app.api.invitation import router as invitation_router, public_router as public_invitation_router
-from app.api.product import router as product_router
-from app.api.inventory import router as inventory_router, summary_router
-from app.api.customer import router as customer_router
-from app.api.order import router as order_router
+from app.api.platform_organization import router as organization_router
+from app.api.platform_member import router as member_router
+from app.api.invitations import router as invitation_router, public_router as public_invitation_router
+from app.api.products import router as product_router
+from app.api.platform_inventory import router as inventory_router, summary_router
+from app.api.platform_customer import router as customer_router
+from app.api.orders import router as order_router
 from app.api.activity import router as activity_router
 from app.api.dashboard import router as dashboard_router
 from app.api.sync import router as sync_router
-from app.api.billing import router as billing_router
-from app.api.admin import router as admin_router
+from app.api.platform_billing import router as billing_router
+from app.api.platform_admin import router as admin_router
 from app.api.notifications import router as notifications_router
+from app.services.billing import start_billing_worker, stop_billing_worker
 
 app = FastAPI(
     title="Multi-Tenant Business Operations SaaS",
@@ -106,6 +107,14 @@ app.include_router(sync_router)
 app.include_router(billing_router)
 app.include_router(admin_router)
 app.include_router(notifications_router)
+
+@app.on_event("startup")
+def startup_event():
+    start_billing_worker()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    stop_billing_worker()
 
 @app.get("/")
 def root():

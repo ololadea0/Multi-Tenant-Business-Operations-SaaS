@@ -11,6 +11,10 @@ class PlatformSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     trial_duration_days: Mapped[int] = mapped_column(Integer, default=14)
+    trial_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    trial_plan_key: Mapped[str] = mapped_column(String(50), default="growth")
+    billing_intervals: Mapped[str] = mapped_column(String(255), default="monthly,annual")
+    renewal_policy: Mapped[str] = mapped_column(String(40), default="manual")
     annual_billing_discount_percent: Mapped[int] = mapped_column(Integer, default=15)
     payment_grace_period_days: Mapped[int] = mapped_column(Integer, default=3)
     support_email: Mapped[str] = mapped_column(String(255), default="support@daymark.app")

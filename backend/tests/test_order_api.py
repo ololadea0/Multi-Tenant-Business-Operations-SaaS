@@ -260,6 +260,51 @@ def test_completed_order_cannot_be_cancelled(
     )
 
 
+def test_complete_order_sends_receipt_email(
+    authenticated_client,
+    organization,
+    customer,
+    product,
+    monkeypatch,
+):
+    calls = []
+
+    def fake_send_email(recipient, **kwargs):
+        calls.append({"recipient": recipient, **kwargs})
+        return True
+
+    monkeypatch.setattr(
+        "app.api.orders.routes.send_order_receipt_email",
+        fake_send_email,
+    )
+
+    response = authenticated_client.post(
+        f"/api/organizations/{organization.id}/orders/",
+        json={
+            "customer_id": customer.id,
+            "items": [
+                {
+                    "product_id": product.id,
+                    "quantity": 2,
+                }
+            ],
+        },
+    )
+
+    order_id = response.json()["id"]
+
+    complete_response = authenticated_client.post(
+        f"/api/organizations/{organization.id}/orders/{order_id}/complete"
+    )
+
+    assert complete_response.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["recipient"] == customer.email
+    assert calls[0]["order_number"]
+    assert calls[0]["customer_name"] == customer.name
+    assert calls[0]["total_amount"] == Decimal(str(response.json()["total_amount"]))
+
+
 def test_get_orders_returns_order_items(
     authenticated_client,
     organization,

@@ -1,7 +1,7 @@
-import { useState } from "react"
-import { Link } from "react-router"
-import { Arrow, MarkIcon } from "../components/Brand"
-import { ProductMockup } from "../components/ProductMockup"
+import { useState } from "react";
+import { Link } from "react-router";
+import { Arrow, MarkIcon } from "../components/Brand";
+import { ProductMockup } from "../features/public/components/ProductMockup";
 
 const featureData = [
   [
@@ -40,14 +40,9 @@ const featureData = [
     "Invite your team, assign roles and keep access aligned with each person’s responsibilities as your business grows.",
     "team",
   ],
-]
+];
 
-function PageHero({
-  label,
-  title,
-  copy,
-  action,
-}) {
+function PageHero({ label, title, copy, action }) {
   return (
     <section className="page-hero">
       <span className="eyebrow">{label}</span>
@@ -59,7 +54,7 @@ function PageHero({
         </Link>
       )}
     </section>
-  )
+  );
 }
 
 export function Features() {
@@ -103,7 +98,7 @@ export function Features() {
         </Link>
       </section>
     </main>
-  )
+  );
 }
 
 function FeatureVisual({ type }) {
@@ -129,7 +124,7 @@ function FeatureVisual({ type }) {
         </>
       ) : type === "insights" ? (
         <div className="mini-chart">
-                <b>₦24,680</b>
+          <b>₦24,680</b>
           <span>NET SALES / 7 DAYS</span>
           <svg viewBox="0 0 300 100">
             <path d="M0 85C45 80 45 35 90 55s45 20 80-12 55 5 130-38" />
@@ -152,7 +147,7 @@ function FeatureVisual({ type }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 export function Solutions() {
@@ -187,7 +182,7 @@ export function Solutions() {
         "Keep responsibility and access clear",
       ],
     ],
-  ]
+  ];
   return (
     <main>
       <PageHero
@@ -212,7 +207,7 @@ export function Solutions() {
               <p>{s[2]}</p>
             </div>
             <ul>
-              {(s[3]).map((x) => (
+              {s[3].map((x) => (
                 <li key={x}>{x}</li>
               ))}
             </ul>
@@ -233,7 +228,7 @@ export function Solutions() {
         </Link>
       </section>
     </main>
-  )
+  );
 }
 
 export function About() {
@@ -301,14 +296,14 @@ export function About() {
         </Link>
       </section>
     </main>
-  )
+  );
 }
 
 export function Contact() {
-  const [sent, setSent] = useState(false)
+  const [sent, setSent] = useState(false);
   function submit(e) {
-    e.preventDefault()
-    setSent(true)
+    e.preventDefault();
+    setSent(true);
   }
   return (
     <main className="contact-page">
@@ -394,5 +389,5 @@ export function Contact() {
         )}
       </section>
     </main>
-  )
+  );
 }

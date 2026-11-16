@@ -1,20 +1,55 @@
 # Python
 __pycache__/
 *.py[cod]
-venv/
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
 .venv/
+.venv311/
+venv/
+venv311/
+env/
+.pytest_cache/
+.pytest_cache
+.mypy_cache/
+.pytype/
+.coverage
+.coverage.*
+htmlcov/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Node
 node_modules/
 dist/
+build/
+frontend/dist/
+frontend/.vite/
 
-# IDE
+# Logs and runtime
+*.log
+logs/
+*.sqlite3
+*.db
+
+# IDE and editor
 .vscode/
+.idea/
+.history/
+*.swp
+*.swo
+*.code-workspace
 
 # OS
 .DS_Store
 Thumbs.db
-.pytest_cache
+Desktop.ini
+
+# Backup files
+*.bak
+*.tmp
+*.orig

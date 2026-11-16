@@ -19,15 +19,9 @@ depends_on = None
 def upgrade():
     platformrole = sa.Enum("user", "super_admin", name="platformrole")
     platformrole.create(op.get_bind(), checkfirst=True)
-    op.add_column(
-        "users",
-        sa.Column(
-            "platform_role",
-            platformrole,
-            nullable=False,
-            server_default="user",
-        ),
-    )
+    inspector = sa.inspect(op.get_bind())
+    if "platform_role" not in {column["name"] for column in inspector.get_columns("users")}:
+        op.add_column("users", sa.Column("platform_role", platformrole, nullable=False, server_default="user"))
     op.execute("UPDATE users SET platform_role = 'user' WHERE platform_role IS NULL")
 
 

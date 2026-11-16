@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+﻿from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from app.api.dependencies import get_current_user
@@ -13,7 +13,7 @@ def test_create_invitation(
     authenticated_client,
     organization,
 ):
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/",
             json={
@@ -47,7 +47,7 @@ def test_create_duplicate_active_invitation(
     db.add(invitation)
     db.commit()
 
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/",
             json={
@@ -66,7 +66,7 @@ def test_cannot_invite_owner_role(
     authenticated_client,
     organization,
 ):
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/",
             json={
@@ -168,7 +168,7 @@ def test_resend_invitation(
 
     old_expiry = invitation.expires_at
 
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/"
             f"{invitation.id}/resend"
@@ -229,7 +229,7 @@ def test_staff_cannot_create_invitation(
     staff_authenticated_client,
     organization,
 ):
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = staff_authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/",
             json={
@@ -286,7 +286,7 @@ def test_staff_cannot_resend_invitation(
     db.commit()
     db.refresh(invitation)
 
-    with patch("app.api.invitation.send_organization_invitation_email"):
+    with patch("app.api.invitations.send_organization_invitation_email"):
         response = staff_authenticated_client.post(
             f"/api/organizations/{organization.id}/invitations/"
             f"{invitation.id}/resend"
